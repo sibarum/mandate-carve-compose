@@ -19,7 +19,7 @@ import java.util.List;
  * same Mlp reference into both constructors — that is the v0 sharing
  * mechanism the plan calls out as a guess flag.
  */
-public final class MlpPrimitive implements Trainable {
+public final class MlpPrimitive implements Trainable, LearnedArithmetic {
     private final MlpRole role;
     private final Mlp mlp;
 
@@ -35,6 +35,7 @@ public final class MlpPrimitive implements Trainable {
         this.mlp = mlp;
     }
 
+    @Override
     public MlpRole role() {
         return role;
     }
@@ -93,5 +94,10 @@ public final class MlpPrimitive implements Trainable {
     public void step(double lr) {
         if (mlp == null) return;
         mlp.step(lr);
+    }
+
+    @Override
+    public Object trainableIdentity() {
+        return mlp;
     }
 }

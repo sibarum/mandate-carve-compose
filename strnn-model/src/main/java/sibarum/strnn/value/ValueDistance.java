@@ -10,6 +10,7 @@ public final class ValueDistance {
             case MatrixValue ma -> frobenius(ma.data(), ((MatrixValue) b).data());
             case StringValue sa -> sa.s().equals(((StringValue) b).s()) ? 0.0 : 1.0;
             case TokenListValue ta -> ta.tokens().equals(((TokenListValue) b).tokens()) ? 0.0 : 1.0;
+            case ParseTreeValue pa -> pa.equals(b) ? 0.0 : 1.0;
         };
     }
 
@@ -30,6 +31,22 @@ public final class ValueDistance {
             case MatrixValue me -> frobenius(me.data(), ((MatrixValue) actual).data()) <= tolerance;
             case StringValue se -> se.s().equals(((StringValue) actual).s());
             case TokenListValue te -> te.tokens().equals(((TokenListValue) actual).tokens());
+            case ParseTreeValue pe -> treeMatches(pe, (ParseTreeValue) actual, tolerance);
         };
+    }
+
+    private static boolean treeMatches(ParseTreeValue expected, ParseTreeValue actual, double tolerance) {
+        if (expected instanceof ParseTreeValue.Literal le && actual instanceof ParseTreeValue.Literal la) {
+            return Math.abs(le.value() - la.value()) <= tolerance;
+        }
+        if (expected instanceof ParseTreeValue.Variable ve && actual instanceof ParseTreeValue.Variable va) {
+            return ve.name().equals(va.name());
+        }
+        if (expected instanceof ParseTreeValue.BinaryOp be && actual instanceof ParseTreeValue.BinaryOp ba) {
+            return be.op() == ba.op()
+                    && treeMatches(be.left(), ba.left(), tolerance)
+                    && treeMatches(be.right(), ba.right(), tolerance);
+        }
+        return false;
     }
 }

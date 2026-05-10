@@ -6,8 +6,6 @@ import sibarum.strnn.computation.CompGraphNode;
 import sibarum.strnn.computation.ComputationGraph;
 import sibarum.strnn.mandate.MandateVerifier;
 import sibarum.strnn.mandate.VerificationReport;
-import sibarum.strnn.mlp.Mlp;
-import sibarum.strnn.primitive.MlpPrimitive;
 import sibarum.strnn.primitive.Primitive;
 import sibarum.strnn.primitive.Trainable;
 import sibarum.strnn.transformation.TransformationEdge;
@@ -42,8 +40,12 @@ public final class Trainer {
     private long lastPrunedAtStep = -1;
 
     public Trainer(TransformationGraph tg, long carverSeed, double mlpLr, Pruner pruner, long pruneEvery) {
+        this(tg, carverSeed, mlpLr, pruner, pruneEvery, 0.0);
+    }
+
+    public Trainer(TransformationGraph tg, long carverSeed, double mlpLr, Pruner pruner, long pruneEvery, double explorationEpsilon) {
         this.tg = tg;
-        this.carver = new BackwardChainingCarver(carverSeed);
+        this.carver = new BackwardChainingCarver(carverSeed, /*budget=*/200, explorationEpsilon);
         this.mlpLr = mlpLr;
         this.pruner = pruner;
         this.pruneEvery = pruneEvery;
@@ -103,17 +105,19 @@ public final class Trainer {
         for (CompGraphNode n : cg.topoOrder()) {
             Primitive p = n.tNode().primitive();
             if (!(p instanceof Trainable t)) continue;
-            if (p instanceof MlpPrimitive mp && mp.isStub()) continue;
+            if (t.trainableIdentity() == null) continue;
             Value target = result.simulatedValues().get(n);
             if (target == null) continue;
             t.backward(target);
         }
-        IdentityHashMap<Mlp, Boolean> stepped = new IdentityHashMap<>();
+        IdentityHashMap<Object, Boolean> stepped = new IdentityHashMap<>();
         for (CompGraphNode n : cg.topoOrder()) {
             Primitive p = n.tNode().primitive();
-            if (p instanceof MlpPrimitive mp && mp.mlp() != null && !stepped.containsKey(mp.mlp())) {
-                mp.step(mlpLr);
-                stepped.put(mp.mlp(), Boolean.TRUE);
+            if (p instanceof Trainable t
+                    && t.trainableIdentity() != null
+                    && !stepped.containsKey(t.trainableIdentity())) {
+                t.step(mlpLr);
+                stepped.put(t.trainableIdentity(), Boolean.TRUE);
             }
         }
     }

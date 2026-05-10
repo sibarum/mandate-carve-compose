@@ -4,5 +4,6 @@ public enum ValueType {
     STRING,
     TOKEN_LIST,
     NUMBER,
-    MATRIX
+    MATRIX,
+    PARSE_TREE
 }

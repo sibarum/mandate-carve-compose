@@ -7,13 +7,18 @@ import sibarum.strnn.mandate.Mandate;
 import sibarum.strnn.mandate.MandateSet;
 import sibarum.strnn.primitive.ComposeMatrices;
 import sibarum.strnn.primitive.MatrixToNumber;
-import sibarum.strnn.primitive.MlpPrimitive;
+import sibarum.strnn.primitive.LearnedArithmetic;
 import sibarum.strnn.primitive.NumberToMatrix;
 import sibarum.strnn.primitive.OutputPrimitive;
+import sibarum.strnn.primitive.ParseExpression;
 import sibarum.strnn.primitive.ParseNumber;
 import sibarum.strnn.primitive.Primitive;
 import sibarum.strnn.primitive.SplitStringAt;
 import sibarum.strnn.primitive.TokenAt;
+import sibarum.strnn.primitive.TreeOutputPrimitive;
+import sibarum.strnn.rewrite.EvaluateBinaryOp;
+import sibarum.strnn.rewrite.RewriteRulePrimitive;
+import sibarum.strnn.value.ParseTreeValue;
 import sibarum.strnn.transformation.TransformationEdge;
 import sibarum.strnn.transformation.TransformationGraph;
 import sibarum.strnn.transformation.TransformationNode;
@@ -64,14 +69,30 @@ public final class BackwardChainingCarver {
 
     private final Random rng;
     private final int budget;
+    private final double epsilon;
 
     public BackwardChainingCarver(long seed) {
-        this(seed, DEFAULT_BUDGET);
+        this(seed, DEFAULT_BUDGET, 0.0);
     }
 
     public BackwardChainingCarver(long seed, int budget) {
+        this(seed, budget, 0.0);
+    }
+
+    /**
+     * @param epsilon exploration rate. With probability epsilon a candidate
+     *                ranking step skips the score-based sort and uses random
+     *                order instead, letting alternative edges accumulate
+     *                samples instead of locking in to whichever edge won the
+     *                initial coin flip. Default 0.0 preserves v0 behavior.
+     */
+    public BackwardChainingCarver(long seed, int budget, double epsilon) {
+        if (epsilon < 0 || epsilon > 1) {
+            throw new IllegalArgumentException("epsilon must be in [0, 1]");
+        }
         this.rng = new Random(seed);
         this.budget = budget;
+        this.epsilon = epsilon;
     }
 
     public CarvingResult carve(TransformationGraph tg, MandateSet mandates, Value rootInput) {
@@ -80,7 +101,7 @@ public final class BackwardChainingCarver {
             throw new IllegalArgumentException("MandateSet has no result mandate");
         }
 
-        TransformationNode outputTNode = findOutputNode(tg);
+        TransformationNode outputTNode = findOutputNode(tg, result.expected().type());
         if (outputTNode == null) return null;
 
         State state = new State(tg, mandates, rootInput, budget);
@@ -121,19 +142,21 @@ public final class BackwardChainingCarver {
     private boolean produceMandate(State state, Value target) {
         List<TransformationNode> candidates = new ArrayList<>(state.tg.nodesProducing(target.type()));
         Collections.shuffle(candidates, rng);
-        candidates.sort(Comparator.comparingDouble((TransformationNode tn) -> {
-            double avg = 0.0;
-            int n = 0;
-            for (TransformationEdge e : state.tg.outgoing(tn)) {
-                if (e.stats().isPruned()) continue;
-                avg += e.stats().score();
-                n++;
-            }
-            return n == 0 ? -1 : avg / n;
-        }).reversed());
+        if (rng.nextDouble() >= epsilon) {
+            candidates.sort(Comparator.comparingDouble((TransformationNode tn) -> {
+                double avg = 0.0;
+                int n = 0;
+                for (TransformationEdge e : state.tg.outgoing(tn)) {
+                    if (e.stats().isPruned()) continue;
+                    avg += e.stats().score();
+                    n++;
+                }
+                return n == 0 ? -1 : avg / n;
+            }).reversed());
+        }
 
         for (TransformationNode cand : candidates) {
-            if (cand.primitive() instanceof OutputPrimitive) continue;
+            if (cand.primitive() instanceof sibarum.strnn.primitive.Terminal) continue;
             List<Value> inputs = inferInputs(cand.primitive(), target, state);
             if (inputs == null) continue;
 
@@ -176,9 +199,12 @@ public final class BackwardChainingCarver {
         return false;
     }
 
-    private TransformationNode findOutputNode(TransformationGraph tg) {
+    private TransformationNode findOutputNode(TransformationGraph tg, ValueType resultType) {
         for (TransformationNode n : tg.nodes()) {
-            if (n.primitive() instanceof OutputPrimitive) return n;
+            Primitive p = n.primitive();
+            if (resultType == ValueType.PARSE_TREE
+                    && p instanceof sibarum.strnn.primitive.TreeOutputPrimitive) return n;
+            if (resultType != ValueType.PARSE_TREE && p instanceof OutputPrimitive) return n;
         }
         return null;
     }
@@ -211,7 +237,7 @@ public final class BackwardChainingCarver {
 
         List<TransformationNode> candidates = rankedCandidates(state, parent.tNode(), wantType, target);
         for (TransformationNode cand : candidates) {
-            if (cand.primitive() instanceof OutputPrimitive) continue;
+            if (cand.primitive() instanceof sibarum.strnn.primitive.Terminal) continue;
             TransformationEdge edge = state.tg.edge(cand, parent.tNode());
             if (edge == null || edge.stats().isPruned()) continue;
 
@@ -288,11 +314,13 @@ public final class BackwardChainingCarver {
             State state, TransformationNode parent, ValueType wantType, Value target) {
         List<TransformationNode> pool = new ArrayList<>(state.tg.nodesProducing(wantType));
         Collections.shuffle(pool, rng);
-        pool.sort(Comparator.comparingDouble((TransformationNode tn) -> {
-            TransformationEdge e = state.tg.edge(tn, parent);
-            if (e == null || e.stats().isPruned()) return Double.NEGATIVE_INFINITY;
-            return e.stats().score();
-        }).reversed());
+        if (rng.nextDouble() >= epsilon) {
+            pool.sort(Comparator.comparingDouble((TransformationNode tn) -> {
+                TransformationEdge e = state.tg.edge(tn, parent);
+                if (e == null || e.stats().isPruned()) return Double.NEGATIVE_INFINITY;
+                return e.stats().score();
+            }).reversed());
+        }
 
         List<TransformationNode> hits = new ArrayList<>();
         List<TransformationNode> rest = new ArrayList<>();
@@ -354,13 +382,14 @@ public final class BackwardChainingCarver {
             }
             return null;
         }
-        if (prim instanceof MlpPrimitive mp && target instanceof MatrixValue mv && mv.dim() == 1) {
+        if (prim instanceof LearnedArithmetic la && target instanceof MatrixValue mv && mv.dim() == 1
+                && !(prim instanceof EvaluateBinaryOp)) {
             double targetScaled = mv.data()[0];
             double targetReal = targetScaled * NumberToMatrix.SCALE;
             List<NumberValue> pool = numericAnchors(state);
             for (NumberValue a : pool) {
                 for (NumberValue b : pool) {
-                    boolean ok = switch (mp.role()) {
+                    boolean ok = switch (la.role()) {
                         case ADD -> Math.abs(a.n() + b.n() - targetReal) < 1e-6;
                         case MUL -> Math.abs(a.n() * b.n() - targetReal) < 1e-6;
                     };
@@ -369,6 +398,46 @@ public final class BackwardChainingCarver {
                                 a.n() / NumberToMatrix.SCALE,
                                 b.n() / NumberToMatrix.SCALE}));
                     }
+                }
+            }
+            return null;
+        }
+        if (prim instanceof EvaluateBinaryOp eval && target instanceof ParseTreeValue.Literal lit) {
+            // Inverter: target Lit(v) <- BinaryOp(op, Lit(a), Lit(b)) where a op b ≈ v.
+            double targetReal = lit.value();
+            List<NumberValue> pool = numericAnchors(state);
+            for (NumberValue a : pool) {
+                for (NumberValue b : pool) {
+                    boolean ok = switch (eval.role()) {
+                        case ADD -> Math.abs(a.n() + b.n() - targetReal) < 1e-6;
+                        case MUL -> Math.abs(a.n() * b.n() - targetReal) < 1e-6;
+                    };
+                    if (ok) {
+                        sibarum.strnn.value.Operator op = (eval.role() == sibarum.strnn.primitive.MlpRole.ADD)
+                                ? sibarum.strnn.value.Operator.ADD
+                                : sibarum.strnn.value.Operator.MUL;
+                        return List.of(new ParseTreeValue.BinaryOp(
+                                op,
+                                new ParseTreeValue.Literal(a.n()),
+                                new ParseTreeValue.Literal(b.n())));
+                    }
+                }
+            }
+            return null;
+        }
+        if (prim instanceof RewriteRulePrimitive rule && target instanceof ParseTreeValue pt) {
+            return rule.inferInput(pt).map(t -> List.<Value>of(t)).orElse(null);
+        }
+        if (prim instanceof TreeOutputPrimitive && target instanceof ParseTreeValue) {
+            return List.of(target);
+        }
+        if (prim instanceof ParseExpression && target instanceof ParseTreeValue pt) {
+            // Only invertible if the available root input parses to the target tree.
+            if (state.rootInput instanceof StringValue) {
+                try {
+                    Value parsed = prim.apply(List.of(state.rootInput));
+                    if (parsed.equals(pt)) return List.of(state.rootInput);
+                } catch (Exception ignored) {
                 }
             }
             return null;
@@ -393,6 +462,20 @@ public final class BackwardChainingCarver {
                     out.add(new NumberValue(Double.parseDouble(t)));
                 } catch (NumberFormatException ignored) {
                 }
+            }
+        } else if (v instanceof ParseTreeValue pt) {
+            collectNumbersFromTree(pt, out);
+        }
+    }
+
+    private static void collectNumbersFromTree(ParseTreeValue t, List<NumberValue> out) {
+        switch (t) {
+            case ParseTreeValue.Literal lit -> out.add(new NumberValue(lit.value()));
+            case ParseTreeValue.BinaryOp bo -> {
+                collectNumbersFromTree(bo.left(), out);
+                collectNumbersFromTree(bo.right(), out);
+            }
+            case ParseTreeValue.Variable ignored -> {
             }
         }
     }

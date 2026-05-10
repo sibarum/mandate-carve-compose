@@ -6,22 +6,24 @@ import sibarum.strnn.value.ValueType;
 import java.util.List;
 
 /**
- * Identity passthrough that marks the terminal node of a computation graph.
+ * Identity passthrough that marks the terminal node of a ParseTree-typed
+ * computation graph. Parallels OutputPrimitive for v0's NumberValue chain;
+ * v2 needs both since the result mandate's type drives terminal selection.
  */
-public final class OutputPrimitive implements Terminal {
+public final class TreeOutputPrimitive implements Terminal {
     @Override
     public String name() {
-        return "output";
+        return "tree-output";
     }
 
     @Override
     public List<ValueType> inputTypes() {
-        return List.of(ValueType.NUMBER);
+        return List.of(ValueType.PARSE_TREE);
     }
 
     @Override
     public ValueType outputType() {
-        return ValueType.NUMBER;
+        return ValueType.PARSE_TREE;
     }
 
     @Override
