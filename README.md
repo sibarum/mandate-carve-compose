@@ -1,53 +1,74 @@
-# Symbolic Term Rewrite Neural Network (STRNN)
+# Mandate, Carve, Compose
 
 A meta-architecture for orchestrating heterogeneous primitives — neural
 networks, hand-coded operations, and symbolic rewrite rules — into
 computation pipelines whose structure is itself learned and inspectable.
 
-## What this is
+> Codebase identifier: **STRNN** (Symbolic Term Rewrite Neural Network) —
+> the original aspirational name, preserved in package paths
+> (`sibarum.strnn.*`). The project has outgrown its starting frame; the
+> three-verb name describes what it has become.
 
-STRNN is **not** a new neural network architecture competing with MLPs
-or transformers. It is a **structural layer** that sits above them.
-The framework's value comes from three properties:
+## The three verbs
 
-1. **Specification-driven design.** Engineers specify what intermediate
-   values must be produced and what type signatures must hold; a search
-   procedure (the *carver*) discovers a working composition that
-   satisfies the specification.
+The framework is one substrate operated through three distinct moves.
+Each is a real piece of code; each names a capability the framework
+demonstrates.
 
-2. **Ante-hoc interpretability.** Mandated intermediate values are
-   enforced *structurally* — either the carved graph produces the
-   value somewhere, or it is rejected. This is verifiable by
-   construction, not by post-hoc analysis of trained weights.
+- **Mandate** — what the engineer brings. A *mandate* is a typed
+  specification of an intermediate or final value that the carved
+  computation must produce *somewhere* along its execution. Mandates
+  are non-local (they specify *what*, not *where*) and structurally
+  enforced: a candidate computation graph either produces the
+  mandated value or is rejected. Code: `sibarum.strnn.mandate.*`.
+- **Carve** — what the framework does. The *carver* searches the
+  transformation graph (the substrate of available primitives) for a
+  computation graph that satisfies every mandate. It backward-chains
+  from the result mandate, ranks candidates by accumulated edge
+  statistics, and uses ε-greedy exploration to avoid lock-in.
+  Code: `sibarum.strnn.carving.*`.
+- **Compose** — what comes out. The carved computation graph is a
+  DAG that composes heterogeneous primitives — MLPs, transformer
+  blocks, deterministic operations, pattern-matched rewrite rules —
+  through typed slot wiring. The same machinery dispatches all of
+  them; the only thing that changes between primitives is what's
+  inside the box. Code: `sibarum.strnn.computation.*`,
+  `sibarum.strnn.primitive.*`, `sibarum.strnn.rewrite.*`.
 
-3. **Heterogeneous composition.** Different primitive types — MLPs,
-   transformer blocks, deterministic operations, pattern-matched
-   rewrite rules — coexist in one transformation graph and are
-   dispatched by the same orchestration machinery.
+The three verbs aren't a slogan layered on top — they map directly
+to package boundaries and to the demos that exercise each capability
+in isolation.
 
-Two graph objects underpin everything: a slowly-shaped **transformation
-graph** (the substrate, an any-to-any-modulo-types library of available
-primitives) and a fast **computation graph** (carved per-task from
-fragments of the transformation graph). The full design rationale lives
-in [`docs/initial-design-doc.md`](docs/initial-design-doc.md).
+## What this is not
+
+- Not a new neural network architecture. The framework sits *above*
+  MLPs and transformers; they remain the workhorses for learned
+  function approximation.
+- Not a symbolic-AI system pretending to use neural nets. Both
+  symbolic rewrite rules and learned components are first-class; the
+  carver dispatches them through the same code path.
+- Not differentiable end-to-end. The carving is discrete; gradients
+  flow only inside individual learned primitives. The framework
+  composes differentiable units without itself being differentiable.
 
 ## Project status
 
-The implementation has progressed through three roughly-equal phases:
+Implementation has progressed through three roughly-equal phases. All
+phases are runnable; each closes with a written-up diagnostic.
 
-- **v0** — substrate + interpretability claim, demonstrated on a single
-  task (arithmetic over single-digit operands).
-- **v1** (Patterns A and B) — heterogeneous composition with two
-  learner types (MLP and transformer), competitive selection between
-  alternatives at the same role, ε-greedy exploration, primitive-level
-  pruning.
-- **v2** — symbolic rewrite rules as first-class primitives;
-  rule-based and learned-leaf primitives coexist under the same carver.
+- **v0** — substrate plus the structural-enforcement claim, demonstrated
+  on a single arithmetic task.
+- **v1** (Patterns A and B) — heterogeneous *learner* composition with
+  two architectures (MLP, transformer); competitive selection at the
+  same role; ε-greedy exploration; primitive-level pruning.
+- **v2** — symbolic rewrite rules as first-class primitives. The dual
+  claim (symbolic rewrite *and* heterogeneous composition under one
+  carving substrate) is demonstrated on the simplest possible test.
 
-All implementation is in Java 25, pure pluggable code with no
-ML-library dependency. MLPs and transformer blocks are written from
-scratch (~500 lines including backprop). The carver, mandate verifier,
-and pattern-matching substrate are all hand-rolled.
+All implementation is in Java 25. MLPs and transformer blocks are
+written from scratch (~500 lines including backprop) with no
+ML-library dependency. The carver, mandate verifier, and pattern-matching
+substrate are all hand-rolled.
 
 ## Documentation index
 
@@ -69,7 +90,7 @@ In dependency order — each builds on the previous:
   even construct a valid graph for the arithmetic task; with full
   mandates, 96% of carvings succeed.
 
-- **The orchestration is component-agnostic** ([02](docs/02-pattern-a-results.md)).
+- **Carved orchestration is component-agnostic** ([02](docs/02-pattern-a-results.md)).
   Swapping MLPs for transformers at the same role and signature leaves
   the carved structure identical (within ~0.3 nodes per primitive
   class across 50 carvings). The carver does not know or care which
@@ -82,8 +103,7 @@ In dependency order — each builds on the previous:
   margin (0.030).
 
 - **Selection responds to evaluation when exploration is enabled** ([03](docs/03-pattern-b-results.md)).
-  v0's pure-exploitation default produced edge-level lock-in (the
-  first edge to score above 0.5 dominated indefinitely). Adding
+  v0's pure-exploitation default produced edge-level lock-in. Adding
   ε-greedy candidate sampling (ε=0.1) restored quality-driven
   selection. The 10% exploration cost paid back in better outcomes.
 
@@ -202,24 +222,27 @@ strnn-model/src/main/java/sibarum/strnn/
 ├── transformer/   # from-scratch Transformer block (single-head attention + FFN + residuals)
 ├── transformation/ # TransformationGraph (substrate), TransformationNode/Edge, EdgeStats
 ├── computation/   # CompGraphNode, SlotSource, ComputationGraph (per-task DAG with topo execution)
-├── mandate/       # Mandate, MandateSet, MandateVerifier
-├── carving/       # BackwardChainingCarver — backward search with mandate-aware ranking + ε-greedy
+├── mandate/       # Mandate, MandateSet, MandateVerifier      ← Mandate
+├── carving/       # BackwardChainingCarver — backward search with mandate-aware ranking + ε-greedy   ← Carve
 ├── rewrite/       # Pattern, Matcher, RewriteRulePrimitive, EvaluateBinaryOp, IdentityZero/One, Distribute, FactorCommon
 ├── training/      # Trainer, Pruner, Datasets
-└── demo/          # all runnable demos
+└── demo/          # all runnable demos                        ← Compose (the runnable demonstrations)
 docs/              # design doc + phase result writeups
 ```
 
 ## Bottom line
 
-The architecture's name describes what exists, not just what was
-intended. STRNN is — at the demonstrated level — a symbolic rewrite
-system that doubles as a heterogeneous network composition platform,
-sharing one orchestration substrate. Whether it scales to genuinely
-hard symbolic tasks is the open question.
+The architecture's name now describes what exists. **Mandate, Carve,
+Compose** is one substrate operated through three distinct moves: the
+engineer specifies what must hold, the framework searches for a
+structure that holds it, the result is a heterogeneous composition.
+At the demonstrated level, this works for symbolic rewrite tasks, for
+heterogeneous learner orchestration, and for their union.
 
-Whether the project keeps demonstrating its value depends on each next
-deliverable being a falsifiable test rather than a layer of new
-abstraction. The pattern from v0 → v1 → v2 has been: pick one specific
-claim, build the smallest thing that tests it, write up what was and
-was not shown. v3 should follow the same discipline.
+Whether it scales to interesting symbolic tasks — algebraic
+simplification with sub-tree rule application, large rule libraries,
+derived rather than hand-specified mandates — is the open question
+that v3 would address. The discipline that produced v0 → v1 → v2 was:
+pick one specific claim, build the smallest thing that tests it,
+write up what was and was not shown. v3 should follow the same
+pattern.
