@@ -78,6 +78,14 @@ runnable; each closes with a written-up diagnostic.
   0/6 to 6/6 along both mandate placements when training is added.
   Demonstrates **functional emergence** — the routing isn't encoded
   in the wiring; it emerges from substrate geometry.
+- **v3 P3** — Inline, mandate-driven training. No pre-training, no
+  separate trainer call: the carved graph hosts the training loop
+  directly. A single mandate (input atom A, output atom B) serves as
+  the structural spec, the gradient target, and the verification
+  predicate. Random W converges in 25 steps. Mandates now play four
+  distinct roles over the same machinery — search constraint,
+  structural-property assertion, behavioural assertion, and training
+  target.
 
 All implementation is in Java 25. MLPs and transformer blocks are
 written from scratch (~500 lines including backprop) with no
@@ -98,6 +106,7 @@ In dependency order — each builds on the previous:
 | [`05-v2-symbolic-rewriting-results.md`](docs/05-v2-symbolic-rewriting-results.md) | Symbolic-rewrite outcomes; the dual-claim diagnostic |
 | [`06-kv-cache-semantic-embeddings.md`](docs/06-kv-cache-semantic-embeddings.md) | KV-cache foundation, semantic ontology, A/B mandate-vs-trainer diagnostic |
 | [`07-similarity-based-rerouting.md`](docs/07-similarity-based-rerouting.md) | Emergent routing in a network, 2×2 (untrained/trained × split/downstream) diagnostic |
+| [`08-inline-mandate-driven-training.md`](docs/08-inline-mandate-driven-training.md) | Mandates drive training inline; four mandate roles over one machinery |
 
 ## What has been demonstrated
 
@@ -154,6 +163,17 @@ In dependency order — each builds on the previous:
   produce*. Mandate non-locality means Case A and Case B verify the
   same routing decision through different positions in the graph.
 
+- **Mandates drive training inline — no pre-training required** ([08](docs/08-inline-mandate-driven-training.md)).
+  A carved graph hosts the training loop directly. One mandate
+  (`input='hot', output='cold'`) serves as the structural spec, the
+  gradient target for the trainable bridge, and the verification
+  predicate. From random W, the bridge converges in 25 forward /
+  backward / step iterations; the same `MandateVerifier` that v0–v2
+  used confirms convergence. Static primitives (frozen table,
+  deterministic lookup, terminal) coexist seamlessly with the
+  trainable bridge in the same graph. Adds the fourth mandate role:
+  *training target*.
+
 ## Known limitations
 
 These are real and worth being explicit about:
@@ -196,19 +216,19 @@ the cache lines:
 
 **KV-cache line:**
 
-1. **Inline / online training.** Currently training is procedural and
-   pre-execution; the carved network just verifies. The next architectural
-   step is letting training happen *during* execution — primitives that
-   update their underlying state when run, mandates that drive training
-   to satisfaction rather than just verifying post-hoc.
+1. **Multi-trainable end-to-end.** Phase 3 has one trainable in the
+   path. Extending to chained trainables requires the framework to
+   propagate `inputGradient` backward across primitive boundaries —
+   autograd-on-the-carving. The framework's "not differentiable
+   end-to-end" claim relaxes *within a carved graph*.
 
-2. **Carver-driven routing assembly.** Phase 2's per-atom networks are
-   manually wired. Mandates could drive the assembly: "produce a routing
-   decision given a query," and the carver picks similarity primitives
-   and references. Bridges from "framework-verified network" to
-   "framework-assembled network."
+2. **Carver-driven assembly with trainables in the substrate.** Phases
+   2 and 3 hand-wire the graph. With the carver, the mandate alone
+   would suffice: "produce B from A" — the carver picks between
+   deterministic bypass primitives and the trainable bridge, edge
+   stats decide which wins over time.
 
-3. **Learned similarity (Q-W-Kᵀ).** Phases 1 and 2 use fixed cosine.
+3. **Learned similarity (Q-W-Kᵀ).** Phases 1–3 use fixed cosine.
    Adding a learned scoring function turns similarity itself into a
    trainable component — the natural next cache variant.
 
@@ -276,6 +296,7 @@ Available demos, ordered by dependency:
 | `SemanticParserDemo`          | v3 P1    | Parser for the six-operator semantic ontology |
 | `SemanticEmbeddingDemo`       | v3 P1    | A/B mandate diagnostic: axes_aligned FAIL → PASS |
 | `SimilarityRoutingDemo`       | v3 P2    | 2×2 routing diagnostic: untrained/trained × split/downstream |
+| `InlineTrainingDemo`          | v3 P3    | Inline mandate-driven training: 25-step convergence from random W |
 
 ## Repository layout
 
