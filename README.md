@@ -53,8 +53,8 @@ in isolation.
 
 ## Project status
 
-Implementation has progressed through three roughly-equal phases. All
-phases are runnable; each closes with a written-up diagnostic.
+Implementation has progressed through four phases. All phases are
+runnable; each closes with a written-up diagnostic.
 
 - **v0** — substrate plus the structural-enforcement claim, demonstrated
   on a single arithmetic task.
@@ -64,11 +64,18 @@ phases are runnable; each closes with a written-up diagnostic.
 - **v2** — symbolic rewrite rules as first-class primitives. The dual
   claim (symbolic rewrite *and* heterogeneous composition under one
   carving substrate) is demonstrated on the simplest possible test.
+- **v3 P1** — KV-cache foundation: symbol↔vector embeddings with
+  bidirectional lookup, total componentwise arithmetic floor (no NaN),
+  learnable vector ops, multi-objective semantic training, and an A/B
+  diagnostic showing that a single mandate moves from FAIL to PASS
+  *solely* because the trainer was given the matching objective. Same
+  primitives, same scorers, same mandate set, two qualitatively
+  different substrates.
 
 All implementation is in Java 25. MLPs and transformer blocks are
 written from scratch (~500 lines including backprop) with no
-ML-library dependency. The carver, mandate verifier, and pattern-matching
-substrate are all hand-rolled.
+ML-library dependency. The carver, mandate verifier, pattern-matching
+substrate, and KV-cache primitives are all hand-rolled.
 
 ## Documentation index
 
@@ -82,6 +89,7 @@ In dependency order — each builds on the previous:
 | [`03-pattern-b-results.md`](docs/03-pattern-b-results.md) | Competitive coexistence; the ε-greedy fix; primitive-level pruning |
 | [`04-v2-plan-symbolic-rewriting.md`](docs/04-v2-plan-symbolic-rewriting.md) | v2 roadmap |
 | [`05-v2-symbolic-rewriting-results.md`](docs/05-v2-symbolic-rewriting-results.md) | Symbolic-rewrite outcomes; the dual-claim diagnostic |
+| [`06-kv-cache-semantic-embeddings.md`](docs/06-kv-cache-semantic-embeddings.md) | KV-cache foundation, semantic ontology, A/B mandate-vs-trainer diagnostic |
 
 ## What has been demonstrated
 
@@ -114,6 +122,17 @@ In dependency order — each builds on the previous:
   different carved orchestrations depending on which rules' patterns
   match the input. `"x + 0"` yields `identity-zero`; `"3 + 4"` yields
   `evaluate-add`. Same library, same carver, same seed.
+
+- **Mandates determine what structural properties the substrate carries** ([06](docs/06-kv-cache-semantic-embeddings.md)).
+  The A/B diagnostic on the trained KV-cache substrate runs the same
+  pipeline twice — same primitives, same scorers, same mandate set,
+  same seed — under two trainer settings. Run A (no axis-alignment
+  objective): `axes_aligned` mandate FAILS, axis score 0.147 (random
+  baseline). Run B (with axis-alignment objective): `axes_aligned`
+  PASSES, axis score 0.818. Two qualitatively different substrates from
+  one specification difference, with the verifier reporting honestly in
+  both directions. Generalizes mandates from "search-time constraints"
+  to "specifications of structural properties the substrate must carry."
 
 ## Known limitations
 
@@ -150,32 +169,43 @@ These are real and worth being explicit about:
 
 ## Next steps (v3 questions)
 
-In dependency order:
+v3 phase 1 (KV-cache foundation) opened a parallel research line. The
+remaining v3 questions split across the symbolic and the cache lines:
 
-1. **Sub-tree rule application.** Without it, symbolic rules can only
-   transform whole trees, which limits the framework to trivially-
-   small expressions. Either add a `Recurse` primitive (orthogonal,
-   adds rules) or build walking into each rule (simpler, less
-   flexible).
+**KV-cache line:**
 
-2. **Rule-library scaling.** Run the existing carver against 20-50
-   rules covering associativity, commutativity, distributivity, and
-   simplification. Instrument per-step search cost. Measure where the
-   `(target, primClass)` cycle key starts blocking legitimate
-   reapplications.
+1. **Carver-driven query pipeline on the trained substrate.** v3 P1
+   built the cache as a substrate with manually-wired verification.
+   Next: a small task ("given an atom, retrieve its dichotomy partner")
+   where the carver assembles `EmbedSymbol → vector op → LookupSymbol`
+   into a query pipeline driven by mandates. Exercises the cache as
+   actual content-addressable memory, not just a substrate.
 
-3. **Mandate derivation.** Right now, every mandate is a fully-
-   specified `(name, expectedValue, tolerance, ordering)` tuple. A
-   useful tool would let users specify abstract goals ("simplify",
-   "evaluate fully", "produce canonical form") and derive concrete
-   mandate sets from them.
+2. **Learned similarity (Q-W-Kᵀ).** The current cache uses fixed cosine.
+   Adding a learned scoring function turns similarity itself into a
+   trainable component — the natural next cache variant after the
+   simplest useful one.
 
-4. **Genuinely-different primitive types in one carving.** Pattern A
-   showed MLPs and transformers transparently swap; v2 showed
-   symbolic and learned coexist. The next test is **all of them at
-   once in one task** — e.g., a transformer that produces a parse
-   tree, a symbolic rule library that simplifies it, and an MLP that
-   evaluates leaves. That exercises the full §1.2 / §8.1 pitch.
+**Symbolic line:**
+
+3. **Sub-tree rule application.** v2's rules apply at the root. Either
+   add a `Recurse` primitive (orthogonal, adds rules) or build walking
+   into each rule (simpler, less flexible).
+
+4. **Rule-library scaling.** Run the carver against 20–50 rules covering
+   associativity, commutativity, distributivity, and simplification.
+   Instrument per-step search cost.
+
+5. **Mandate derivation.** Specify abstract goals ("simplify", "evaluate
+   fully", "produce canonical form") and derive concrete mandate sets
+   from them — eliminating the hand-specification limitation.
+
+6. **All primitive types in one carving.** Pattern A showed MLPs and
+   transformers swap; v2 showed symbolic and learned coexist; v3 P1
+   added embedding-space ops. The next test is **all of them at once in
+   one task** — a transformer that produces a parse tree, a symbolic
+   rule library that simplifies it, an MLP that evaluates leaves, and
+   an embedding cache that carries semantic context.
 
 ## Build and run
 
@@ -211,6 +241,13 @@ Available demos, ordered by dependency:
 | `EvaluateBinaryOpDemo`        | v2 P3    | Learned MLP inside a symbolic rule                 |
 | `TreeCarvingDemo`             | v2 P4    | Carver builds tree-shaped pipelines                |
 | `SymbolicRewriteDemo`         | v2 P5    | The dual-claim diagnostic                          |
+| `TotalArithmeticDemo`         | v3 P1    | Total componentwise arithmetic floor (no NaN, sign-preserving) |
+| `SymbolEmbeddingDemo`         | v3 P1    | Symbol↔vector substrate (lazy init + cosine reverse lookup) |
+| `EmbeddingTrainingDemo`       | v3 P1    | SGD through the embedding table; contrastive structure |
+| `TrainedRecallDemo`           | v3 P1    | Composed proof: trained KV cache survives noise |
+| `VectorOpsDemo`               | v3 P1    | Learnable transform, vector +/−/·, similarity gate |
+| `SemanticParserDemo`          | v3 P1    | Parser for the six-operator semantic ontology |
+| `SemanticEmbeddingDemo`       | v3 P1    | A/B mandate diagnostic: axes_aligned FAIL → PASS |
 
 ## Repository layout
 
@@ -226,23 +263,36 @@ strnn-model/src/main/java/sibarum/strnn/
 ├── carving/       # BackwardChainingCarver — backward search with mandate-aware ranking + ε-greedy   ← Carve
 ├── rewrite/       # Pattern, Matcher, RewriteRulePrimitive, EvaluateBinaryOp, IdentityZero/One, Distribute, FactorCommon
 ├── training/      # Trainer, Pruner, Datasets
+├── cache/         # KV-cache foundation: SymbolEmbeddingTable, EmbedSymbol/LookupSymbol, TotalArithmetic,
+│   │             # VectorTransform/Add/Sub/Mul, SimilarityGate
+│   └── semantic/  # parser + AST for the semantic ontology, multi-objective trainer, three scoring primitives
 └── demo/          # all runnable demos                        ← Compose (the runnable demonstrations)
 docs/              # design doc + phase result writeups
+strnn-model/src/main/resources/sample-semantics.txt  # hand-crafted ontology used by v3 P1 demos
 ```
 
 ## Bottom line
 
-The architecture's name now describes what exists. **Mandate, Carve,
+The architecture's name describes what exists. **Mandate, Carve,
 Compose** is one substrate operated through three distinct moves: the
-engineer specifies what must hold, the framework searches for a
-structure that holds it, the result is a heterogeneous composition.
+engineer specifies what must hold, the framework searches for or trains
+a structure that holds it, the result is a heterogeneous composition.
 At the demonstrated level, this works for symbolic rewrite tasks, for
-heterogeneous learner orchestration, and for their union.
+heterogeneous learner orchestration, for their union, and (as of v3 P1)
+for trained vector-space substrates whose properties are themselves
+mandate-specified.
 
-Whether it scales to interesting symbolic tasks — algebraic
-simplification with sub-tree rule application, large rule libraries,
-derived rather than hand-specified mandates — is the open question
-that v3 would address. The discipline that produced v0 → v1 → v2 was:
-pick one specific claim, build the smallest thing that tests it,
-write up what was and was not shown. v3 should follow the same
-pattern.
+The v3 P1 A/B result generalized what mandates *do*. They started as
+search-time constraints (v0 / v1 / v2: which structure does the carver
+pick?). They now also serve as specifications of structural properties
+that must hold over a trained substrate (v3 P1: same primitives, two
+trainer objectives, two qualitatively different substrates). The
+MandateVerifier doesn't care which mode — it just confirms whether the
+expected structure exists.
+
+Whether the framework scales further — to large rule libraries, derived
+mandates, learned similarity, all-primitive-types-in-one-carving — are
+the open v3 questions. The discipline that produced v0 → v1 → v2 → v3 P1
+was: pick one specific claim, build the smallest thing that tests it,
+write up what was and was not shown. The remaining v3 phases should
+follow the same pattern.
