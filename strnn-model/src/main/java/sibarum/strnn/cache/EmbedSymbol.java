@@ -31,6 +31,10 @@ public final class EmbedSymbol implements Trainable {
         this.table = table;
     }
 
+    public SymbolEmbeddingTable table() {
+        return table;
+    }
+
     @Override
     public String name() {
         return "embed-symbol";

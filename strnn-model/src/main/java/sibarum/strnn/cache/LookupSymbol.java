@@ -22,6 +22,10 @@ public final class LookupSymbol implements Primitive {
         this.table = table;
     }
 
+    public SymbolEmbeddingTable table() {
+        return table;
+    }
+
     @Override
     public String name() {
         return "lookup-symbol";

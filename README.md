@@ -86,6 +86,14 @@ runnable; each closes with a written-up diagnostic.
   distinct roles over the same machinery — search constraint,
   structural-property assertion, behavioural assertion, and training
   target.
+- **v3 P4** — Carver-driven end-to-end. The carver assembles the
+  KV-cache pipeline itself from a primitive library, no hand-wired
+  ComputationGraph. A generic `InlineTrainer` walks the carving,
+  picks up every `Trainable`, and uses the carver's simulated values
+  as per-trainable targets. Single mandate, single root input, single
+  call: framework builds the graph, trains the bridge, verifies the
+  result. Scope: one trainable per gradient path; multi-trainable
+  end-to-end (autograd-on-the-carving) remains deferred.
 
 All implementation is in Java 25. MLPs and transformer blocks are
 written from scratch (~500 lines including backprop) with no
@@ -107,6 +115,7 @@ In dependency order — each builds on the previous:
 | [`06-kv-cache-semantic-embeddings.md`](docs/06-kv-cache-semantic-embeddings.md) | KV-cache foundation, semantic ontology, A/B mandate-vs-trainer diagnostic |
 | [`07-similarity-based-rerouting.md`](docs/07-similarity-based-rerouting.md) | Emergent routing in a network, 2×2 (untrained/trained × split/downstream) diagnostic |
 | [`08-inline-mandate-driven-training.md`](docs/08-inline-mandate-driven-training.md) | Mandates drive training inline; four mandate roles over one machinery |
+| [`09-carver-driven-end-to-end.md`](docs/09-carver-driven-end-to-end.md) | Carver assembles the KV-cache pipeline; generic InlineTrainer; no hand-wired graph |
 
 ## What has been demonstrated
 
@@ -174,6 +183,23 @@ In dependency order — each builds on the previous:
   trainable bridge in the same graph. Adds the fourth mandate role:
   *training target*.
 
+- **No hand-wired graphs: the carver assembles end-to-end** ([09](docs/09-carver-driven-end-to-end.md)).
+  The carver from v0 (originally built for arithmetic operator MLPs)
+  is now exercised against the KV-cache primitives. Given a
+  TransformationGraph of `EmbedSymbol`, `VectorTransform`,
+  `LookupSymbol`, and `StringOutputPrimitive`, a single result
+  mandate (`StringValue("cold")`), and a root input
+  (`StringValue("hot")`), the carver assembles
+  `embed → bridge → lookup → output` automatically — picking the
+  trainable bridge as the only edge that can close the gap between
+  unrelated symbols. A generic `InlineTrainer` (no knowledge of any
+  specific primitive) iterates over whatever trainables the carver
+  placed, using the carver's `simulatedValues` as per-trainable
+  targets, and converges in 25 steps. Scope: one trainable per
+  gradient path; the autograd-on-the-carving step that would let
+  multiple trainables share gradient flow is still deferred, but
+  every other piece of "no hand-wiring" now works end-to-end.
+
 ## Known limitations
 
 These are real and worth being explicit about:
@@ -216,21 +242,26 @@ the cache lines:
 
 **KV-cache line:**
 
-1. **Multi-trainable end-to-end.** Phase 3 has one trainable in the
-   path. Extending to chained trainables requires the framework to
-   propagate `inputGradient` backward across primitive boundaries —
-   autograd-on-the-carving. The framework's "not differentiable
-   end-to-end" claim relaxes *within a carved graph*.
+1. **Multi-trainable end-to-end.** Phase 4 has one trainable per
+   carved gradient path. Extending to chained trainables requires
+   the framework to propagate `inputGradient` backward across primitive
+   boundaries — autograd-on-the-carving. The framework's "not
+   differentiable end-to-end" claim relaxes *within a carved graph*.
 
-2. **Carver-driven assembly with trainables in the substrate.** Phases
-   2 and 3 hand-wire the graph. With the carver, the mandate alone
-   would suffice: "produce B from A" — the carver picks between
-   deterministic bypass primitives and the trainable bridge, edge
-   stats decide which wins over time.
+2. **Multiple KVs per symbol.** A single symbol carries multiple
+   embeddings (orthogonal "views"), all retrieved together. The carver
+   picks which view a given bridge attends to. Sidesteps the disambiguation
+   question by making "all views" the only addressable unit.
 
-3. **Learned similarity (Q-W-Kᵀ).** Phases 1–3 use fixed cosine.
+3. **Learned similarity (Q-W-Kᵀ).** Phases 1–4 use fixed cosine.
    Adding a learned scoring function turns similarity itself into a
    trainable component — the natural next cache variant.
+
+4. **Inline-train + edge-stats feedback.** Every successful inline
+   training run is also a vote of confidence in the placed bridges.
+   Feeding the trainer's success score back into `EdgeStats` would
+   let the carver learn over many sessions which bridges are worth
+   assembling — the "substrate learns from solving tasks" loop.
 
 **Symbolic line:**
 
@@ -297,6 +328,7 @@ Available demos, ordered by dependency:
 | `SemanticEmbeddingDemo`       | v3 P1    | A/B mandate diagnostic: axes_aligned FAIL → PASS |
 | `SimilarityRoutingDemo`       | v3 P2    | 2×2 routing diagnostic: untrained/trained × split/downstream |
 | `InlineTrainingDemo`          | v3 P3    | Inline mandate-driven training: 25-step convergence from random W |
+| `CarverEndToEndDemo`          | v3 P4    | Carver assembles KV pipeline; generic InlineTrainer; no hand-wired graph |
 
 ## Repository layout
 
@@ -311,7 +343,7 @@ strnn-model/src/main/java/sibarum/strnn/
 ├── mandate/       # Mandate, MandateSet, MandateVerifier      ← Mandate
 ├── carving/       # BackwardChainingCarver — backward search with mandate-aware ranking + ε-greedy   ← Carve
 ├── rewrite/       # Pattern, Matcher, RewriteRulePrimitive, EvaluateBinaryOp, IdentityZero/One, Distribute, FactorCommon
-├── training/      # Trainer, Pruner, Datasets
+├── training/      # Trainer, Pruner, Datasets, InlineTrainer
 ├── cache/         # KV-cache foundation: SymbolEmbeddingTable, EmbedSymbol/LookupSymbol, TotalArithmetic,
 │   │             # VectorTransform/Add/Sub/Mul, SimilarityGate
 │   └── semantic/  # parser + AST for the semantic ontology, multi-objective trainer, three scoring primitives

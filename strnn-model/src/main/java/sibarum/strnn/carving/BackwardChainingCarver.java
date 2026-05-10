@@ -5,6 +5,9 @@ import sibarum.strnn.computation.ComputationGraph;
 import sibarum.strnn.computation.SlotSource;
 import sibarum.strnn.mandate.Mandate;
 import sibarum.strnn.mandate.MandateSet;
+import sibarum.strnn.cache.EmbedSymbol;
+import sibarum.strnn.cache.LookupSymbol;
+import sibarum.strnn.cache.VectorTransform;
 import sibarum.strnn.primitive.ComposeMatrices;
 import sibarum.strnn.primitive.MatrixToNumber;
 import sibarum.strnn.primitive.LearnedArithmetic;
@@ -14,7 +17,9 @@ import sibarum.strnn.primitive.ParseExpression;
 import sibarum.strnn.primitive.ParseNumber;
 import sibarum.strnn.primitive.Primitive;
 import sibarum.strnn.primitive.SplitStringAt;
+import sibarum.strnn.primitive.Terminal;
 import sibarum.strnn.primitive.TokenAt;
+import sibarum.strnn.primitive.Trainable;
 import sibarum.strnn.primitive.TreeOutputPrimitive;
 import sibarum.strnn.rewrite.EvaluateBinaryOp;
 import sibarum.strnn.rewrite.RewriteRulePrimitive;
@@ -105,6 +110,7 @@ public final class BackwardChainingCarver {
         if (outputTNode == null) return null;
 
         State state = new State(tg, mandates, rootInput, budget);
+        precomputeForwardAnchors(state);
         CompGraphNode terminal = state.createNode(outputTNode);
 
         if (!solve(state, terminal, 0, result.expected(), 0, new ArrayList<>())) {
@@ -201,10 +207,7 @@ public final class BackwardChainingCarver {
 
     private TransformationNode findOutputNode(TransformationGraph tg, ValueType resultType) {
         for (TransformationNode n : tg.nodes()) {
-            Primitive p = n.primitive();
-            if (resultType == ValueType.PARSE_TREE
-                    && p instanceof sibarum.strnn.primitive.TreeOutputPrimitive) return n;
-            if (resultType != ValueType.PARSE_TREE && p instanceof OutputPrimitive) return n;
+            if (n.primitive() instanceof Terminal && n.outputType() == resultType) return n;
         }
         return null;
     }
@@ -351,8 +354,30 @@ public final class BackwardChainingCarver {
     }
 
     private List<Value> inferInputs(Primitive prim, Value target, State state) {
-        if (prim instanceof OutputPrimitive) {
+        if (prim instanceof Terminal) {
             return List.of(target);
+        }
+        if (prim instanceof LookupSymbol ls && target instanceof StringValue(String s)) {
+            // LookupSymbol's inversion is exact: the matrix that lookup-to-s requires
+            // is the symbol's canonical embedding.
+            return List.of(new MatrixValue(ls.table().embed(s)));
+        }
+        if (prim instanceof EmbedSymbol es && target instanceof MatrixValue mv) {
+            // EmbedSymbol's inversion: which symbol's embedding is the target?
+            // Use cosine nearest. If no symbol resolves, this path fails.
+            return es.table().nearest(mv.data())
+                    .map(s -> List.<Value>of(new StringValue(s)))
+                    .orElse(null);
+        }
+        if (prim instanceof VectorTransform vt && target instanceof MatrixValue) {
+            // Trainable: any type-compatible upstream value is acceptable. The
+            // forward anchor (the value reachable from rootInput by deterministic
+            // primitives) gives the carver a concrete input to recurse on.
+            Value anchor = state.forwardAnchors.get(ValueType.MATRIX);
+            if (anchor instanceof MatrixValue mv && mv.dim() == vt.inDim()) {
+                return List.of(anchor);
+            }
+            return null;
         }
         if (prim instanceof ParseNumber && target instanceof NumberValue(double n)) {
             String s = isInteger(n) ? Integer.toString((int) Math.round(n)) : Double.toString(n);
@@ -428,9 +453,6 @@ public final class BackwardChainingCarver {
         if (prim instanceof RewriteRulePrimitive rule && target instanceof ParseTreeValue pt) {
             return rule.inferInput(pt).map(t -> List.<Value>of(t)).orElse(null);
         }
-        if (prim instanceof TreeOutputPrimitive && target instanceof ParseTreeValue) {
-            return List.of(target);
-        }
         if (prim instanceof ParseExpression && target instanceof ParseTreeValue pt) {
             // Only invertible if the available root input parses to the target tree.
             if (state.rootInput instanceof StringValue) {
@@ -484,6 +506,50 @@ public final class BackwardChainingCarver {
         return Math.abs(d - Math.round(d)) < 1e-9;
     }
 
+    /**
+     * Walk forward from the rootInput through non-Terminal primitives until
+     * fixpoint, recording one representative value per output type. The
+     * anchor is used by solve() as a concrete value to recurse on when the
+     * candidate primitive can't (or shouldn't) be inverted exactly — most
+     * notably trainable primitives, whose input doesn't need to be a specific
+     * value (they'll learn to map whatever comes in).
+     *
+     * Trainables are included in the walk: their current forward function is
+     * well-defined, and we only need a value of the right type at the right
+     * position. First-found-per-type wins.
+     */
+    private void precomputeForwardAnchors(State state) {
+        state.forwardAnchors.put(state.rootInput.type(), state.rootInput);
+        boolean changed = true;
+        int guard = 0;
+        while (changed && guard++ < 32) {
+            changed = false;
+            for (TransformationNode tn : state.tg.nodes()) {
+                Primitive p = tn.primitive();
+                if (p instanceof Terminal) continue;
+                if (state.forwardAnchors.containsKey(tn.outputType())) continue;
+                List<Value> ins = new ArrayList<>();
+                boolean ok = true;
+                for (ValueType t : tn.inputTypes()) {
+                    Value v = state.forwardAnchors.get(t);
+                    if (v == null) {
+                        ok = false;
+                        break;
+                    }
+                    ins.add(v);
+                }
+                if (!ok) continue;
+                try {
+                    Value out = p.apply(ins);
+                    state.forwardAnchors.put(tn.outputType(), out);
+                    changed = true;
+                } catch (RuntimeException ignored) {
+                    // primitive couldn't accept these inputs at runtime; skip
+                }
+            }
+        }
+    }
+
     private static final class State {
         final TransformationGraph tg;
         final MandateSet mandates;
@@ -493,6 +559,7 @@ public final class BackwardChainingCarver {
         final List<RootBinding> rootBindings = new ArrayList<>();
         final Map<CompGraphNode, Value> simulatedValues = new HashMap<>();
         final Set<CompGraphNode> completed = new HashSet<>();
+        final Map<ValueType, Value> forwardAnchors = new HashMap<>();
         int budget;
         int uid = 0;
 
