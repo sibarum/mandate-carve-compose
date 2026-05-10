@@ -71,6 +71,13 @@ runnable; each closes with a written-up diagnostic.
   *solely* because the trainer was given the matching objective. Same
   primitives, same scorers, same mandate set, two qualitatively
   different substrates.
+- **v3 P2** — Emergent similarity-based rerouting. A network whose
+  routing decisions depend on cosine similarity to learned cluster
+  references. The 2×2 diagnostic (untrained vs trained substrate ×
+  Case A mandate-on-split vs Case B mandate-downstream) goes from
+  0/6 to 6/6 along both mandate placements when training is added.
+  Demonstrates **functional emergence** — the routing isn't encoded
+  in the wiring; it emerges from substrate geometry.
 
 All implementation is in Java 25. MLPs and transformer blocks are
 written from scratch (~500 lines including backprop) with no
@@ -90,6 +97,7 @@ In dependency order — each builds on the previous:
 | [`04-v2-plan-symbolic-rewriting.md`](docs/04-v2-plan-symbolic-rewriting.md) | v2 roadmap |
 | [`05-v2-symbolic-rewriting-results.md`](docs/05-v2-symbolic-rewriting-results.md) | Symbolic-rewrite outcomes; the dual-claim diagnostic |
 | [`06-kv-cache-semantic-embeddings.md`](docs/06-kv-cache-semantic-embeddings.md) | KV-cache foundation, semantic ontology, A/B mandate-vs-trainer diagnostic |
+| [`07-similarity-based-rerouting.md`](docs/07-similarity-based-rerouting.md) | Emergent routing in a network, 2×2 (untrained/trained × split/downstream) diagnostic |
 
 ## What has been demonstrated
 
@@ -134,6 +142,18 @@ In dependency order — each builds on the previous:
   both directions. Generalizes mandates from "search-time constraints"
   to "specifications of structural properties the substrate must carry."
 
+- **Routing emerges from substrate geometry, not from wiring** ([07](docs/07-similarity-based-rerouting.md)).
+  A network with two similarity gates and a difference node correctly
+  classifies atoms by cluster membership only when the substrate is
+  trained. 2×2 grid: untrained substrate scores 0/6 in both Case A
+  (mandate the split) and Case B (mandate downstream); trained
+  substrate scores 6/6 in both. Same network, same wiring, same
+  mandate forms — only the substrate's training state changes.
+  Demonstrates **functional emergence** plus a third use of mandates:
+  specifying *what behaviour a network running on the substrate must
+  produce*. Mandate non-locality means Case A and Case B verify the
+  same routing decision through different positions in the graph.
+
 ## Known limitations
 
 These are real and worth being explicit about:
@@ -169,43 +189,50 @@ These are real and worth being explicit about:
 
 ## Next steps (v3 questions)
 
-v3 phase 1 (KV-cache foundation) opened a parallel research line. The
-remaining v3 questions split across the symbolic and the cache lines:
+v3 phase 1 (KV-cache foundation) opened a parallel research line; phase 2
+(similarity-based rerouting) demonstrated functional emergence on top of
+that substrate. The remaining v3 questions split across the symbolic and
+the cache lines:
 
 **KV-cache line:**
 
-1. **Carver-driven query pipeline on the trained substrate.** v3 P1
-   built the cache as a substrate with manually-wired verification.
-   Next: a small task ("given an atom, retrieve its dichotomy partner")
-   where the carver assembles `EmbedSymbol → vector op → LookupSymbol`
-   into a query pipeline driven by mandates. Exercises the cache as
-   actual content-addressable memory, not just a substrate.
+1. **Inline / online training.** Currently training is procedural and
+   pre-execution; the carved network just verifies. The next architectural
+   step is letting training happen *during* execution — primitives that
+   update their underlying state when run, mandates that drive training
+   to satisfaction rather than just verifying post-hoc.
 
-2. **Learned similarity (Q-W-Kᵀ).** The current cache uses fixed cosine.
+2. **Carver-driven routing assembly.** Phase 2's per-atom networks are
+   manually wired. Mandates could drive the assembly: "produce a routing
+   decision given a query," and the carver picks similarity primitives
+   and references. Bridges from "framework-verified network" to
+   "framework-assembled network."
+
+3. **Learned similarity (Q-W-Kᵀ).** Phases 1 and 2 use fixed cosine.
    Adding a learned scoring function turns similarity itself into a
-   trainable component — the natural next cache variant after the
-   simplest useful one.
+   trainable component — the natural next cache variant.
 
 **Symbolic line:**
 
-3. **Sub-tree rule application.** v2's rules apply at the root. Either
+4. **Sub-tree rule application.** v2's rules apply at the root. Either
    add a `Recurse` primitive (orthogonal, adds rules) or build walking
    into each rule (simpler, less flexible).
 
-4. **Rule-library scaling.** Run the carver against 20–50 rules covering
+5. **Rule-library scaling.** Run the carver against 20–50 rules covering
    associativity, commutativity, distributivity, and simplification.
    Instrument per-step search cost.
 
-5. **Mandate derivation.** Specify abstract goals ("simplify", "evaluate
+6. **Mandate derivation.** Specify abstract goals ("simplify", "evaluate
    fully", "produce canonical form") and derive concrete mandate sets
    from them — eliminating the hand-specification limitation.
 
-6. **All primitive types in one carving.** Pattern A showed MLPs and
+7. **All primitive types in one carving.** Pattern A showed MLPs and
    transformers swap; v2 showed symbolic and learned coexist; v3 P1
-   added embedding-space ops. The next test is **all of them at once in
-   one task** — a transformer that produces a parse tree, a symbolic
-   rule library that simplifies it, an MLP that evaluates leaves, and
-   an embedding cache that carries semantic context.
+   added embedding-space ops; v3 P2 added similarity-based routing.
+   The next test is **all of them at once in one task** — a transformer
+   that produces a parse tree, a symbolic rule library that simplifies
+   it, an MLP that evaluates leaves, and an embedding cache that
+   carries semantic context with similarity-based dispatch.
 
 ## Build and run
 
@@ -248,6 +275,7 @@ Available demos, ordered by dependency:
 | `VectorOpsDemo`               | v3 P1    | Learnable transform, vector +/−/·, similarity gate |
 | `SemanticParserDemo`          | v3 P1    | Parser for the six-operator semantic ontology |
 | `SemanticEmbeddingDemo`       | v3 P1    | A/B mandate diagnostic: axes_aligned FAIL → PASS |
+| `SimilarityRoutingDemo`       | v3 P2    | 2×2 routing diagnostic: untrained/trained × split/downstream |
 
 ## Repository layout
 
