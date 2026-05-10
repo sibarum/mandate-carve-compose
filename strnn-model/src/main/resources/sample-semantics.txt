@@ -1,0 +1,119 @@
+#
+# Legend:
+# Dichotomy, A versus B: (A | B)
+# Along the axis of, in the context of: (A ~> B)
+# Qualifier, A describes B, B of A: (A:B)
+# Any, union, either apply, any are applicable: (A & B)
+# Combine to one, merge, compose, inseparable: (A*B)
+# And, both are required and/or present, but distinct: (A+B)
+#
+#
+# Dichotomies:
+# ============
+(true | false) ~> (truth & logic & philosophy)
+(empty | full) ~> (presence & existence)
+(void | value) ~> presence
+(nothing | something) ~> (presence & quantity)
+(zero | infinity) ~> quantity
+(absence | presence) ~> abstract:presence
+(physical | abstract) ~> physicality
+(undefined | defined) ~> (abstraction & symbolic)
+(indefinite | definite) ~> (certainty & confidence)
+(impossible | inevitable) ~> (existence & effects)
+(solid | fluid) ~> physical:state
+(hard | soft) ~> physical:property
+(conductive | dielectric) ~> physical:property
+(alive | dead) ~> life
+(friendly | hostile) ~> disposition
+(fast | slow) ~> (speed & motion & physics)
+(bright | dark) ~> light
+(up | down) ~> direction
+(heavy | lightweight) ~> (gravity & weight)
+(dynamic | static) ~> (motion & time)
+(big | small) ~> (size & volume)
+(positive | negative) ~> (balance & numeric)
+(compression | expansion) ~> physical:volume
+(left | right) ~> (direction & polarity)
+(right | wrong) ~> (judgement & disposition)
+(protagonist | antagonist) ~> (narrative & character:trait)
+(predator | prey) ~> (hunting & cause+effect)
+(violent | peaceful) ~> (environment & disposition)
+(chaotic | predictable) ~> (entropy & environment)
+(polar | neutral) ~> (dynamics & polarity)
+(motion | stationary) ~> (physics & dynamics)
+(structure | collapse) ~> (abstract:description & physical:state)
+(random | ordered) ~> (environment & dynamics)
+(lawful | criminal) ~> (society & law+order)
+(logical | illogical) ~> (deduction & logic & philosophy)
+(together | apart) ~> (spatial:reasoning)
+(tall | short) ~> (physicality & size)
+(smooth | rough) ~> (texture & physical:property)
+(sharp | dull) ~> (physical:property & intelligence:description)
+(reflective | diffuse) ~> (physical:property & light)
+(malleable | brittle) ~> physical:property
+(irrelevant | important) ~> conceptual:property
+(boring | amazing) ~> (anecdotal & disposition)
+(practical | theoretical) ~> conceptual:property
+(knowledge | ignorance) ~> intelligence:description
+(pain | pleasure) ~> (disposition & life & disposition)
+(intelligence | stupidity) ~> intelligence:description
+(broad | narrow) ~> (breadth & scope)
+(expand | contract) ~> (physical:volume & size)
+(inflate | deflate) ~> (physical:volume & size & air:volume)
+(whisper | yell) ~> (audio & audio:volume)
+(gentle | forceful) ~> (intention & physics & intensity)
+(loud | quiet) ~> (audio & audio:volume)
+(search | hide) ~> (action & intention)
+(attack | defend) ~> (action & intention & disposition)
+(integral | derivative) ~> (mathematics & action & abstract)
+(stop | go) ~> (action & intention)
+(freeze | thaw) ~> (temperature & physical:state & action)
+(frozen | molten) ~> (temperature & physical:state & physical:description)
+(oxidation | reduction) ~> (oxygen & chemistry)
+(continuum | quantum) ~> abstract:discrete
+(infinitesimal | astronomical) ~> (size & volume & gravity)
+(participant | observer) ~> (intention & disposition & action & social:role)
+(exclusion | membership) ~> (placement & location & disposition)
+(ancestor | descendent) ~> (chronology & ancestry, cause+effect)
+(nemesis | companion) ~> (disposition & intention & narrative)
+(familiar | foreign) ~> (disposition & source & origin)
+(native | alien) ~> (geographic:origin & interpretation)
+(active | sedentary) ~> (motion & intention)
+(hot | cold) ~> (temperature & physical:property)
+(sprawling | confined) ~> (physical:presence & dynamics & volume)
+(free | imprisoned) ~> (freedom & cause+effect)
+(brave | fearful) ~> (disposition & emotion)
+(agreement | contradiction) ~> (truth & logic)
+(parallel | perpendicular) ~> (geometry & orientation)
+(homogenous | heterogeneous) ~> (distribution & abstract:property)
+(dangerous | safe) ~> (safety & danger)
+(energetic | apathetic) ~> (emotion & disposition)
+(over | under) ~> (orientation & height & motion)
+(top | bottom) ~> (orientation & placement)
+(dirty | clean) ~> (judgement & upkeep)
+(delicious | putrid) ~> (disposition & food & judgement)
+(average | exceptional) ~> judgement
+(plain | extravagant) ~> (judgement & visual)
+(illness | health) ~> (wellbeing & nutrition & medicine)
+(focus | blur) ~> (vision & judgement & eyesight & concentration)
+(hit | miss) ~> (action & targeting & goals)
+(master | amateur) ~> (professional:experience & skill & judgement)
+(leader | follower) ~> social:role
+(torrent | trickle) ~> (fluid:flow & water & rate:flow)
+(bashful | boastful) ~> (disposition & personality)
+(hiding | seeking) ~> (action & game & behavior)
+(bearish | bullish) ~> (disposition & financial & judgement)
+(long | short) ~> (length & distance & size & dimensions)
+(confidence | insecurity) ~> (disposition & social:role)
+(secure | vulnerable) ~> (safety & judgement)
+(accompanied | alone) ~> (social & human:relationships)
+(introvert | extrovert) ~> (social & personality)
+(ordinary | unbelievable) ~> (event:rarity & judgement)
+(straight | twisted) ~> (geometry & orientation)
+(tidy | messy) ~> (judgement & cleanliness & environment)
+(faith | suspect) ~> (morality & epistemic & uncertainty)
+(cause | effect) ~> (cause+effect & dynamics)
+(heads | tails) ~> (chance & gambling & fairness)
+(tough | weak) ~> (safety & judgement & strength)
+(sustain | decay) ~> (audio & sound & dynamics & time & reverb)
+(gain | loss) ~> (signal:analysis & audio & dynamics & audio:volume)
