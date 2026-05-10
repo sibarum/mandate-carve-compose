@@ -477,6 +477,8 @@ public final class BackwardChainingCarver {
             }
             case ParseTreeValue.Variable ignored -> {
             }
+            case ParseTreeValue.Omega ignored -> {
+            }
         }
     }
 

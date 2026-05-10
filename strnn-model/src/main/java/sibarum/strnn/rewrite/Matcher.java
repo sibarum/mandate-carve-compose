@@ -30,6 +30,7 @@ public final class Matcher {
             case Pattern.LitPat lp -> t instanceof ParseTreeValue.Literal l && l.value() == lp.value();
             case Pattern.VarPat vp -> t instanceof ParseTreeValue.Variable v && v.name().equals(vp.name());
             case Pattern.HolePat hp -> b.bind(hp.name(), t);
+            case Pattern.OmegaPat ignored -> t instanceof ParseTreeValue.Omega;
             case Pattern.OpPat op -> t instanceof ParseTreeValue.BinaryOp bo
                     && bo.op() == op.op()
                     && matchInto(op.left(), bo.left(), b)
@@ -42,6 +43,7 @@ public final class Matcher {
             case Pattern.LitPat lp -> new ParseTreeValue.Literal(lp.value());
             case Pattern.VarPat vp -> new ParseTreeValue.Variable(vp.name());
             case Pattern.HolePat hp -> b.require(hp.name());
+            case Pattern.OmegaPat ignored -> ParseTreeValue.Omega.INSTANCE;
             case Pattern.OpPat op -> new ParseTreeValue.BinaryOp(
                     op.op(),
                     substitute(op.left(), b),

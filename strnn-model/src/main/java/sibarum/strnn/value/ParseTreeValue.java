@@ -14,7 +14,8 @@ import java.util.Objects;
 public sealed interface ParseTreeValue extends Value
         permits ParseTreeValue.Literal,
                 ParseTreeValue.Variable,
-                ParseTreeValue.BinaryOp {
+                ParseTreeValue.BinaryOp,
+                ParseTreeValue.Omega {
 
     @Override
     default ValueType type() {
@@ -28,6 +29,22 @@ public sealed interface ParseTreeValue extends Value
                 return Integer.toString((int) value);
             }
             return Double.toString(value);
+        }
+    }
+
+    /**
+     * The reciprocal of zero in the total, reversible algebra. Distinct from
+     * any Literal: ω is not a number you can compute with ordinary IEEE doubles
+     * (which would give NaN for 0·ω). Rewrite rules give it its meaning —
+     * notably 0·ω → 1 in the wider rule library — and its presence as a
+     * dedicated variant prevents accidental coercion to Double.POSITIVE_INFINITY.
+     */
+    record Omega() implements ParseTreeValue {
+        public static final Omega INSTANCE = new Omega();
+
+        @Override
+        public String toString() {
+            return "ω";
         }
     }
 
@@ -80,11 +97,16 @@ public sealed interface ParseTreeValue extends Value
         return new BinaryOp(Operator.DIV, l, r);
     }
 
+    static ParseTreeValue omega() {
+        return Omega.INSTANCE;
+    }
+
     /** Depth-first count of nodes in the tree. */
     default int size() {
         return switch (this) {
             case Literal l -> 1;
             case Variable v -> 1;
+            case Omega o -> 1;
             case BinaryOp b -> 1 + b.left.size() + b.right.size();
         };
     }

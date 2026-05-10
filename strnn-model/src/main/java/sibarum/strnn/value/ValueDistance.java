@@ -42,6 +42,9 @@ public final class ValueDistance {
         if (expected instanceof ParseTreeValue.Variable ve && actual instanceof ParseTreeValue.Variable va) {
             return ve.name().equals(va.name());
         }
+        if (expected instanceof ParseTreeValue.Omega && actual instanceof ParseTreeValue.Omega) {
+            return true;
+        }
         if (expected instanceof ParseTreeValue.BinaryOp be && actual instanceof ParseTreeValue.BinaryOp ba) {
             return be.op() == ba.op()
                     && treeMatches(be.left(), ba.left(), tolerance)

@@ -45,8 +45,21 @@ public sealed interface Pattern {
         }
     }
 
+    record OmegaPat() implements Pattern {
+        public static final OmegaPat INSTANCE = new OmegaPat();
+
+        @Override
+        public String toString() {
+            return "ω";
+        }
+    }
+
     static Pattern lit(double v) {
         return new LitPat(v);
+    }
+
+    static Pattern omega() {
+        return OmegaPat.INSTANCE;
     }
 
     static Pattern var(String name) {
