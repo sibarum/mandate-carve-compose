@@ -132,6 +132,19 @@ runnable; each closes with a written-up diagnostic.
   `NetworkCache` (Phase 1: identity-on-vocabulary; Phase 2: positive
   shift with identity maintenance — blocks cross-cache shortcuts
   from rank-1 linear bridge extrapolation).
+- **v3 P9** — **A substrate that builds itself.** Mandates drive
+  the cache's growth. For each `(input, output)` mandate: try to
+  carve from the current inventory; if it fails, BFS the cache from
+  the mandate's input to find the deepest reachable atom, spawn one
+  new bridge to close the gap, re-carve. Seven mandates over an
+  initially empty cache produce 5 spawns + 2 reuses; the final
+  inventory is a minimal spanning set that covers every mandate
+  seen. Mandate 7 (`cold→ice`) was a reuse — the cache had already
+  assembled `cold→freeze→ice` from prior spawns and the carver found
+  it. The framework's most autonomous form: the user writes the
+  mandate stream, the framework returns the carving and grows the
+  substrate as needed. Mandate, Carve, Compose — over a substrate
+  that didn't exist when the demo started.
 - **v3 P7** — **NetworkCache: a cache that learns its own inventory.**
   `NetworkCache` is a stateful cache of `NetworkItem`s with
   spawn-on-demand training. Start empty; each `(input → output)` pair
@@ -170,6 +183,7 @@ In dependency order — each builds on the previous:
 | [`11-key-network.md`](docs/11-key-network.md) | Key-Network: cached subgraphs as `CachedItem`; carver composes two stored networks |
 | [`12-network-cache.md`](docs/12-network-cache.md) | NetworkCache: stateful cache of trained subgraphs; spawn-on-demand; eviction by success |
 | [`13-carver-composes-from-cache.md`](docs/13-carver-composes-from-cache.md) | Carver composes from the cache's inventory; N-step composition via BFS reachability |
+| [`14-grand-finale.md`](docs/14-grand-finale.md) | The grand finale: a substrate that builds itself from a stream of mandates |
 
 ## What has been demonstrated
 
@@ -436,6 +450,7 @@ Available demos, ordered by dependency:
 | `KeyNetworkDemo`              | v3 P6    | Cached subgraphs as substrate items; carver composes two stored networks |
 | `NetworkCacheTrainingDemo`    | v3 P7    | NetworkCache builds inventory from data; bounded variant evicts by success |
 | `CarverFromCacheDemo`         | v3 P8    | Carver composes from cache inventory; N-step compositions per mandate |
+| `AdaptiveCarverDemo`          | v3 P9    | **Grand finale**: substrate builds itself; mandates drive cache growth |
 
 ## Repository layout
 
