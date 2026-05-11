@@ -158,6 +158,22 @@ runnable; each closes with a written-up diagnostic.
   spawns by evicting the 2 least-successful entries while preserving
   `hot` (which was re-fed three times). The cache is a coordinator on
   top of the existing carver + trainer; no framework changes needed.
+- **v3 P10** — **Mandate-Carve-Compose as a methodology.** The
+  framework leaves the toy substrate and tackles real-world NLP:
+  build an entity span extractor for an Elden Ring lore corpus that
+  generalizes to unseen items. Eight iterations on one task, each
+  failure naming the next missing mandate — POS tagging
+  (UD English EWT) → BIO structural mandate → Parquet pretraining
+  → staged training → Lexicanum cross-entry labeling + density
+  filter → POS-conditioned decode constraint. The artifact isn't a
+  state-of-the-art model; it's the *worked example of mandate-driven
+  AI development* — and the demonstrably-auditable system that falls
+  out of it. Adds the `mcc-elden-ring` downstream-consumer module,
+  the `store/` persistence-boundary interfaces (`NetworkStore`,
+  `EntityStore<N,R>`, `VectorStore`), two new framework primitives
+  (`TextTokenize`, `ClassifierHead`), and the first end-to-end
+  multi-layer backprop chain in the framework (POS loss flows
+  through the context encoder into the embedding table).
 
 All implementation is in Java 25. MLPs and transformer blocks are
 written from scratch (~500 lines including backprop) with no
@@ -185,6 +201,7 @@ In dependency order — each builds on the previous:
 | [`12-network-cache.md`](docs/12-network-cache.md) | NetworkCache: stateful cache of trained subgraphs; spawn-on-demand; eviction by success |
 | [`13-carver-composes-from-cache.md`](docs/13-carver-composes-from-cache.md) | Carver composes from the cache's inventory; N-step composition via BFS reachability |
 | [`14-grand-finale.md`](docs/14-grand-finale.md) | The grand finale: a substrate that builds itself from a stream of mandates |
+| [`15-mandate-as-methodology.md`](docs/15-mandate-as-methodology.md) | Eight iterations on real-world NLP; MCC as a development methodology, not just a framework |
 
 ## What has been demonstrated
 
@@ -314,6 +331,22 @@ In dependency order — each builds on the previous:
   of the existing carver + trainer; "items are networks" is opaque
   to its interface but load-bearing for what it does.
 
+- **Mandate-Carve-Compose as a development methodology** ([15](docs/15-mandate-as-methodology.md)).
+  Eight iterations on real-world NLP — entity extraction over a hand-
+  annotated Elden Ring corpus, generalizing to a held-out questline.
+  Each iteration's failure mode named the next missing mandate: POS
+  tagging (function words leaking as entities) → BIO structural
+  mandate (binary too coarse) → Parquet pretraining (proper-noun
+  generalization) → staged training (style transfer) → Lexicanum
+  cross-entry labeling + density filter (lore-style register) →
+  POS-conditioned decode constraint (cleanest output yet). The
+  artifact isn't a state-of-the-art model; it's the *worked example*
+  that MCC is a development methodology, not just a framework: a
+  model designed to be auditable is necessarily a stack of small,
+  named, individually-validated layers, where every failure is
+  localizable. This is to AI roughly what TDD is to software
+  engineering — designing for inspectability changes what you build.
+
 ## Known limitations
 
 These are real and worth being explicit about:
@@ -405,16 +438,32 @@ the cache lines:
 
 ## Build and run
 
-Java 25 (GraalVM tested), Maven multi-module:
+Java 25 (GraalVM tested), Maven multi-module. Framework:
 
 ```
 mvn -pl strnn-model compile
 ```
 
-Demos run as standalone classes. From the project root:
+Full project (framework + Elden Ring NLP module):
+
+```
+mvn clean install -DskipTests
+```
+
+Framework demos run as standalone classes:
 
 ```
 java -cp strnn-model/target/classes sibarum.strnn.demo.<DemoName>
+```
+
+P10 NLP demos require external datasets to be downloaded into
+`download/` (see `download-files.md` for attribution) and are run via
+the `exec-maven-plugin`:
+
+```
+mvn -pl mcc-elden-ring exec:java \
+  -Dexec.mainClass=sibarum.elden.demo.BioCrossEntryDemo \
+  -Dexec.args="./download/en_ewt-ud-train.conllu ./download/Lexicanum_Warhammer_RAG-v1.12.txt"
 ```
 
 Available demos, ordered by dependency:
@@ -452,14 +501,25 @@ Available demos, ordered by dependency:
 | `NetworkCacheTrainingDemo`    | v3 P7    | NetworkCache builds inventory from data; bounded variant evicts by success |
 | `CarverFromCacheDemo`         | v3 P8    | Carver composes from cache inventory; N-step compositions per mandate |
 | `AdaptiveCarverDemo`          | v3 P9    | **Grand finale**: substrate builds itself; mandates drive cache growth |
+| `TokenizerDemo`               | v3 P10   | `TextTokenize` primitive across the full Elden Ring corpus (vocab=1,243) |
+| `EmbeddingDemo`               | v3 P10   | Embedding substrate end-to-end: lookup stability, NN, gradient updates |
+| `SpanTaggerTrainingDemo`      | v3 P10   | Binary span tagger trained on annotated items, F1=0.987 on training set |
+| `RanniInferenceDemo`          | v3 P10   | Binary span tagger inference on held-out Ranni's questline |
+| `PosTaggerTrainingDemo`       | v3 P10   | POS layer trained on UD English EWT; end-to-end backprop into embedding table |
+| `PosAwareInferenceDemo`       | v3 P10   | Span tagger augmented with predicted POS as input features |
+| `BioInferenceDemo`            | v3 P10   | BIO (3-class) structural mandate: multi-word entities cluster cleanly |
+| `BioWithProperNounsDemo`      | v3 P10   | Staged training: Parquet (news NER) → fine-tune on Elden Ring |
+| `BioWithLoreDemo`             | v3 P10   | Staged training with Parquet + Lexicanum (self-mention labeling) |
+| `BioCrossEntryDemo`           | v3 P10   | **Best run**: Lexicanum cross-entry labeling + density filter + POS-conditioned decode |
 
 ## Repository layout
 
 ```
-strnn-model/src/main/java/sibarum/strnn/
+strnn-model/src/main/java/sibarum/strnn/          ← THE FRAMEWORK
 ├── value/         # sealed Value hierarchy (StringValue, NumberValue, MatrixValue, TokenListValue, ParseTreeValue)
 ├── primitive/     # Primitive interface, Trainable, LearnedArithmetic, Terminal markers
-├── mlp/           # from-scratch Mlp with backprop
+│                  # + TextTokenize, ClassifierHead (P10)
+├── mlp/           # from-scratch Mlp with backprop (backward returns input gradient — consumed by P10)
 ├── transformer/   # from-scratch Transformer block (single-head attention + FFN + residuals)
 ├── transformation/ # TransformationGraph (substrate), TransformationNode/Edge, EdgeStats
 ├── computation/   # CompGraphNode, SlotSource, ComputationGraph (per-task DAG with topo execution)
@@ -468,11 +528,25 @@ strnn-model/src/main/java/sibarum/strnn/
 ├── rewrite/       # Pattern, Matcher, RewriteRulePrimitive, EvaluateBinaryOp, IdentityZero/One, Distribute, FactorCommon
 ├── training/      # Trainer, Pruner, Datasets, InlineTrainer
 ├── cache/         # KV-cache foundation: SymbolEmbeddingTable, EmbedSymbol/LookupSymbol, TotalArithmetic,
-│   │             # VectorTransform/Add/Sub/Mul, SimilarityGate
+│   │             # VectorTransform/Add/Sub/Mul, SimilarityGate; CachedItem/NetworkItem/NetworkCache
 │   └── semantic/  # parser + AST for the semantic ontology, multi-objective trainer, three scoring primitives
-└── demo/          # all runnable demos                        ← Compose (the runnable demonstrations)
-docs/              # design doc + phase result writeups
+├── store/         # P10: NetworkStore, EntityStore<N,R>, VectorStore — persistence-boundary interfaces
+└── demo/          # all runnable framework demos              ← Compose (the runnable demonstrations)
+
+mcc-elden-ring/src/main/java/sibarum/elden/       ← P10 DOWNSTREAM CONSUMER
+├── corpus/        # Item, ItemCategory, ShatteringEra, RannisQuestline, VolcanoManor, DungEaterQuestline, MillicentQuestline
+├── annotation/    # AnnotatedItem, EntityType, EntitySpan, Relation, RelationType, AnnotationParser, ImplicitEntities + 4 storyline annotation files
+├── graph/         # EntityGraph, EntityNode, EntityGraphBuilder
+├── embedding/     # CorpusVocabulary, OffsetTokenizer, ContextEncoder
+├── pos/           # ConlluParser, PosTagset, PosTrainer (end-to-end backprop)
+├── data/          # ParquetBioLoader (DuckDB), LexicanumParser, LexicanumCrossEntryLabeler, SurfaceTrie
+├── training/      # TaggingTrainingData, TaggerPipeline
+└── demo/          # all NLP pipeline demos
+
+docs/              # design doc + phase result writeups (01..15)
 strnn-model/src/main/resources/sample-semantics.txt  # hand-crafted ontology used by v3 P1 demos
+download/          # external datasets pulled in for P10 (UD CoNLL-U, Parquet, Lexicanum); .gitignored
+download-files.md  # attribution paper-trail for downloaded datasets
 ```
 
 ## Bottom line
@@ -500,3 +574,13 @@ the open v3 questions. The discipline that produced v0 → v1 → v2 → v3 P1
 was: pick one specific claim, build the smallest thing that tests it,
 write up what was and was not shown. The remaining v3 phases should
 follow the same pattern.
+
+**Phase 10 added a further claim**: MCC is not only a framework but a
+*technique* — a discipline for building AI systems as stacks of small,
+named, individually-validated layers where every failure is localizable
+to a specific layer with a specific named mandate. This is to AI roughly
+what TDD is to software engineering: designing for inspectability
+changes what you build. The Elden Ring NLP pipeline in `mcc-elden-ring`
+is the worked example. The methodology — diagnose, name the missing
+mandate, add the layer, repeat — is the artifact that carries over to
+whatever gets built on the framework next.

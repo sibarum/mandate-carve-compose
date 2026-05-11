@@ -32,6 +32,10 @@ import java.util.List;
 import java.util.Random;
 import java.util.Set;
 
+/* POS tags that should never start an entity span. Adjective and noun
+ * categories are kept allowed because compound proper nouns often begin
+ * with them ("Black Knives" starts ADJ; "Rune of Death" starts NOUN). */
+
 /**
  * Focused lore-prose training: scan the Lexicanum for entities (titles +
  * aliases), label all cross-entry mentions in every entry's prose, filter
@@ -70,6 +74,10 @@ public final class BioCrossEntryDemo {
     private static final double FINETUNE_LR = 0.01;
     private static final double DEFAULT_MIN_DENSITY = 0.10;
     private static final int DEFAULT_MIN_ENTITY_TOKENS = 5;
+
+    private static final Set<String> STOP_POS_FOR_B = Set.of(
+            "ADP", "ADV", "AUX", "CCONJ", "DET", "INTJ", "PART",
+            "PRON", "PUNCT", "SCONJ", "SYM", "VERB");
 
     public static void main(String[] args) throws IOException, ClassNotFoundException, java.sql.SQLException {
         if (args.length < 2) {
@@ -181,33 +189,59 @@ public final class BioCrossEntryDemo {
         System.out.println("=== Inference on Ranni's questline (after both stages) ===");
         List<Item> ranniItems = RannisQuestline.items();
         int totalTokens = 0;
-        int[] predLabelCounts = new int[NUM_LABELS];
-        int totalSpans = 0;
+        int[] rawLabelCounts = new int[NUM_LABELS];
+        int[] constrainedLabelCounts = new int[NUM_LABELS];
+        int totalRawSpans = 0;
+        int totalConstrainedSpans = 0;
+        int totalBDemoted = 0;
         for (Item item : ranniItems) {
             System.out.println();
             System.out.println("---------------- " + item.name() + " ----------------");
             List<OffsetToken> toks = OffsetTokenizer.tokenize(item.description());
             List<String> forms = toks.stream().map(OffsetToken::text).toList();
-            int[] predLabels = new int[toks.size()];
+            int[] posPreds = new int[toks.size()];
+            int[] rawBio = new int[toks.size()];
             for (int i = 0; i < toks.size(); i++) {
-                double[] feat = featureFor(pos, forms, i, contextDim, posDim);
-                double[] logits = ((MatrixValue) tagger.apply(List.of(new MatrixValue(feat)))).data();
-                predLabels[i] = argmax(logits);
-                predLabelCounts[predLabels[i]]++;
+                double[] ctx = pos.contextOf(forms, i);
+                double[] posLogits = ((MatrixValue) pos.classifier.apply(List.of(new MatrixValue(ctx)))).data();
+                posPreds[i] = argmax(posLogits);
+                double[] feat = new double[contextDim + posDim];
+                System.arraycopy(ctx, 0, feat, 0, contextDim);
+                System.arraycopy(posLogits, 0, feat, contextDim, posDim);
+                double[] bioLogits = ((MatrixValue) tagger.apply(List.of(new MatrixValue(feat)))).data();
+                rawBio[i] = argmax(bioLogits);
+                rawLabelCounts[rawBio[i]]++;
             }
+            int[] constrained = posConstrainedDecode(rawBio, posPreds);
+            for (int b : constrained) constrainedLabelCounts[b]++;
+            int demoted = 0;
+            for (int i = 0; i < rawBio.length; i++) {
+                if (rawBio[i] == LABEL_B && constrained[i] != LABEL_B) demoted++;
+            }
+            totalBDemoted += demoted;
+
             totalTokens += toks.size();
-            List<String> spans = BioInferenceDemo.decodeBioSpans(toks, predLabels);
-            totalSpans += spans.size();
-            System.out.println("  predicted spans (" + spans.size() + "):");
-            for (String span : spans) System.out.println("    • " + span);
+            List<String> rawSpans = BioInferenceDemo.decodeBioSpans(toks, rawBio);
+            List<String> constrainedSpans = BioInferenceDemo.decodeBioSpans(toks, constrained);
+            totalRawSpans += rawSpans.size();
+            totalConstrainedSpans += constrainedSpans.size();
+
+            System.out.printf("  raw spans:         %d (B demoted by POS constraint: %d)%n",
+                    rawSpans.size(), demoted);
+            System.out.println("  constrained spans (" + constrainedSpans.size() + "):");
+            for (String span : constrainedSpans) System.out.println("    • " + span);
         }
         System.out.println();
         System.out.println("=== Final corpus-level summary (Ranni, unseen) ===");
-        System.out.printf("items inferred:    %d%n", ranniItems.size());
-        System.out.printf("total tokens:      %d%n", totalTokens);
-        System.out.printf("predicted labels:  O=%d  B=%d  I=%d%n",
-                predLabelCounts[LABEL_O], predLabelCounts[LABEL_B], predLabelCounts[LABEL_I]);
-        System.out.printf("predicted spans:   %d%n", totalSpans);
+        System.out.printf("items inferred:           %d%n", ranniItems.size());
+        System.out.printf("total tokens:             %d%n", totalTokens);
+        System.out.printf("raw labels:               O=%d  B=%d  I=%d%n",
+                rawLabelCounts[LABEL_O], rawLabelCounts[LABEL_B], rawLabelCounts[LABEL_I]);
+        System.out.printf("constrained labels:       O=%d  B=%d  I=%d%n",
+                constrainedLabelCounts[LABEL_O], constrainedLabelCounts[LABEL_B], constrainedLabelCounts[LABEL_I]);
+        System.out.printf("B demoted by POS rule:    %d%n", totalBDemoted);
+        System.out.printf("raw spans:                %d%n", totalRawSpans);
+        System.out.printf("constrained spans:        %d%n", totalConstrainedSpans);
         System.out.println();
         System.out.println("Compare prior runs:");
         System.out.println("  RanniInferenceDemo  (binary, no POS):                 13.2%, 67 spans");
@@ -215,6 +249,29 @@ public final class BioCrossEntryDemo {
         System.out.println("  BioInferenceDemo    (BIO + POS):                      12.5%, 67 spans");
         System.out.println("  BioWithProperNounsDemo (Parquet stage 1):             ~10.5%, 54 spans");
         System.out.println("  BioWithLoreDemo (Parquet + self-mention Lexicanum):    ~14%, 77 spans");
+        System.out.println("  BioCrossEntryDemo (cross-entry + density, no constraint): 13.0%, 67 spans");
+    }
+
+    /** Apply POS-conditioned decoding to a raw BIO prediction sequence. */
+    private static int[] posConstrainedDecode(int[] rawBio, int[] posPreds) {
+        int[] out = new int[rawBio.length];
+        for (int i = 0; i < rawBio.length; i++) {
+            int raw = rawBio[i];
+            String posTag = PosTagset.tagAt(posPreds[i]);
+            if (raw == LABEL_B) {
+                out[i] = STOP_POS_FOR_B.contains(posTag) ? LABEL_O : LABEL_B;
+            } else if (raw == LABEL_I) {
+                // I only valid if previous constrained position is B or I.
+                if (i > 0 && (out[i - 1] == LABEL_B || out[i - 1] == LABEL_I)) {
+                    out[i] = LABEL_I;
+                } else {
+                    out[i] = LABEL_O;
+                }
+            } else {
+                out[i] = LABEL_O;
+            }
+        }
+        return out;
     }
 
     private static void trainPhase(ClassifierHead tagger, List<double[]> inputs, List<Integer> labels,
