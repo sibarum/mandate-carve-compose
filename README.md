@@ -119,6 +119,18 @@ runnable; each closes with a written-up diagnostic.
   the inner vocabularies are disjoint at the input atom. The "values
   are networks" reframing of KV is real, and lives inside the
   framework as just one more variant of one more interface.
+- **v3 P7** — **NetworkCache: a cache that learns its own inventory.**
+  `NetworkCache` is a stateful cache of `NetworkItem`s with
+  spawn-on-demand training. Start empty; each `(input → output)` pair
+  fed to it either matches an existing entry or triggers a fresh
+  carving + inline-training run that produces a new stored network.
+  Optional `maxNetworks` cap with eviction by success count, so the
+  cache's contents drift toward whatever mappings the training data
+  actually exercises. Two-run diagnostic: unbounded cache populates
+  4 entries from 4 distinct mappings; bounded cache (max=3) handles 5
+  spawns by evicting the 2 least-successful entries while preserving
+  `hot` (which was re-fed three times). The cache is a coordinator on
+  top of the existing carver + trainer; no framework changes needed.
 
 All implementation is in Java 25. MLPs and transformer blocks are
 written from scratch (~500 lines including backprop) with no
@@ -143,6 +155,7 @@ In dependency order — each builds on the previous:
 | [`09-carver-driven-end-to-end.md`](docs/09-carver-driven-end-to-end.md) | Carver assembles the KV-cache pipeline; generic InlineTrainer; no hand-wired graph |
 | [`10-multi-head-kv.md`](docs/10-multi-head-kv.md) | Multi-head KV; per-source forward anchors; edge-stats feedback; three-session diagnostic |
 | [`11-key-network.md`](docs/11-key-network.md) | Key-Network: cached subgraphs as `CachedItem`; carver composes two stored networks |
+| [`12-network-cache.md`](docs/12-network-cache.md) | NetworkCache: stateful cache of trained subgraphs; spawn-on-demand; eviction by success |
 
 ## What has been demonstrated
 
@@ -257,6 +270,20 @@ In dependency order — each builds on the previous:
   Primitive/Carver machinery as anything else. No new abstraction
   layer was needed — one new `CachedItem` variant plus an
   `inferInputs` case in the carver.
+
+- **A cache that learns its own inventory** ([12](docs/12-network-cache.md)).
+  `NetworkCache` starts empty and spawns new `NetworkItem`s on demand:
+  every `(input → output)` pair fed to it either matches an existing
+  entry (counts as a successful use) or triggers a full carving +
+  inline-training pass that produces and stores a new network.
+  Optional bounded capacity with eviction by success count makes the
+  cache's contents drift toward whatever mappings the training data
+  actually exercises. The diagnostic runs an unbounded cache to 4
+  spawns/4 entries, then a bounded cache (max=3) through 5 spawns
+  with 2 evictions — `hot` is re-fed three times and survives, the
+  least-used entries get dropped. The cache is a coordinator on top
+  of the existing carver + trainer; "items are networks" is opaque
+  to its interface but load-bearing for what it does.
 
 ## Known limitations
 
@@ -393,6 +420,7 @@ Available demos, ordered by dependency:
 | `CarverEndToEndDemo`          | v3 P4    | Carver assembles KV pipeline; generic InlineTrainer; no hand-wired graph |
 | `MultiHeadCarvedDemo`         | v3 P5    | Two parallel KV chains; carver picks via edge stats; independent specialization |
 | `KeyNetworkDemo`              | v3 P6    | Cached subgraphs as substrate items; carver composes two stored networks |
+| `NetworkCacheTrainingDemo`    | v3 P7    | NetworkCache builds inventory from data; bounded variant evicts by success |
 
 ## Repository layout
 
