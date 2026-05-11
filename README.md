@@ -126,12 +126,13 @@ runnable; each closes with a written-up diagnostic.
   mandates over the same 3-network cache produce three different
   composed chains: `hot→cold` (1-step), `hot→freeze` (2-step via
   composition), `hot→ice` (3-step via composition). Adds BFS
-  reachability to the carver's forward-anchor pre-pass (conditional
-  on the substrate containing `CachedNetworkPrimitive`s — needed for
-  N-step composition) and two-phase regularized bridge training to
-  `NetworkCache` (Phase 1: identity-on-vocabulary; Phase 2: positive
-  shift with identity maintenance — blocks cross-cache shortcuts
-  from rank-1 linear bridge extrapolation).
+  reachability to the carver's forward-anchor pre-pass (deterministic
+  primitives only — Trainables get a single per-node anchor instead,
+  since their forward produces unbounded continuous outputs) and
+  two-phase regularized bridge training to `NetworkCache` (Phase 1:
+  identity-on-vocabulary; Phase 2: positive shift with identity
+  maintenance — blocks cross-cache shortcuts from rank-1 linear
+  bridge extrapolation).
 - **v3 P9** — **A substrate that builds itself.** Mandates drive
   the cache's growth. For each `(input, output)` mandate: try to
   carve from the current inventory; if it fails, BFS the cache from

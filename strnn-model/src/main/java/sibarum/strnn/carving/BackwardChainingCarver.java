@@ -552,18 +552,6 @@ public final class BackwardChainingCarver {
         state.reachableValuesByType
                 .computeIfAbsent(state.rootInput.type(), k -> new java.util.LinkedHashSet<>())
                 .add(state.rootInput);
-        // BFS reachability is only useful when the substrate contains
-        // primitives that compose deterministically over the input space
-        // (e.g., CachedNetworkPrimitive — Key-Network). Skipping it for
-        // substrates without such primitives keeps the pre-pass fast and
-        // bounded for the common KV-cache / trainable-bridge case.
-        boolean bfsEnabled = false;
-        for (TransformationNode tn : state.tg.nodes()) {
-            if (tn.primitive() instanceof CachedNetworkPrimitive) {
-                bfsEnabled = true;
-                break;
-            }
-        }
         boolean changed = true;
         int guard = 0;
         while (changed && guard++ < 32) {
@@ -610,7 +598,7 @@ public final class BackwardChainingCarver {
                 //     through one would generate unbounded distinct matrix
                 //     values. Trainables still get their per-node anchor
                 //     above for solve()'s recursion to terminate on.
-                if (bfsEnabled && tn.inputTypes().size() == 1 && !(p instanceof Trainable)) {
+                if (tn.inputTypes().size() == 1 && !(p instanceof Trainable)) {
                     Set<Value> options = state.reachableValuesByType
                             .getOrDefault(tn.inputTypes().getFirst(), Collections.emptySet());
                     for (Value v : new ArrayList<>(options)) {
@@ -618,7 +606,6 @@ public final class BackwardChainingCarver {
                             Value out = p.apply(List.of(v));
                             Set<Value> outSet = state.reachableValuesByType
                                     .computeIfAbsent(out.type(), k -> new java.util.LinkedHashSet<>());
-                            if (outSet.size() >= 1024) continue;
                             if (outSet.add(out)) {
                                 changed = true;
                             }

@@ -216,12 +216,6 @@ is all extensions and refinements rather than load-bearing claims:
 5. **Phase 5b emergence.** Multi-head substrate, no hand-bias, edge
    stats specialize heads from random init alone.
 
-6. **The known BFS bug.** The carver's BFS reachability pre-pass
-   has an unresolved memory issue when applied to substrates with
-   multiple parallel trainable primitives. The conditional gate
-   (only run BFS when the substrate contains `CachedNetworkPrimitive`)
-   keeps both demo classes working but doesn't fix the underlying
-   bug. Future debugging.
 
 ## Bottom line
 

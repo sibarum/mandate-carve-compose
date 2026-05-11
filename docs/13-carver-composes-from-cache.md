@@ -158,14 +158,16 @@ picking the right (primitive, input) pair at each step.
 
 ## Honest observations and limitations
 
-- **BFS is conditional on substrate content.** When no
-  `CachedNetworkPrimitive` is present, BFS is skipped. This is because
-  unbounded BFS through some Trainable substrates (multi-head with two
-  parallel `VectorTransform`s) hits memory issues — there's a real bug
-  in the interaction between my BFS and parallel-trainable substrates
-  that I haven't fully diagnosed. The conditional gate keeps every
-  prior demo working while unlocking Phase 8. The bug is real but
-  doesn't matter for substrates we use.
+- **BFS skips Trainable primitives.** Iterating BFS through a
+  Trainable's forward function would generate unbounded distinct
+  output values (each application produces a new continuous-valued
+  vector that's almost certainly not equal to any prior one).
+  Trainables still get their per-node anchor in the first part of
+  the pre-pass — that's enough for `solve()`'s recursion to
+  terminate at the root. BFS is reserved for deterministic
+  primitives whose outputs are naturally bounded (e.g., cached
+  networks returning vocabulary atoms, lookups returning stored
+  symbols).
 
 - **The shortcut check is run as an assertion, not as carver guidance.**
   The demo asserts that no single primitive directly produces the
