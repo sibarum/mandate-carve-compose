@@ -106,6 +106,19 @@ runnable; each closes with a written-up diagnostic.
   chain A re-verifies hot→cold in **zero** steps (no further
   training). The "multiple views, carver selects" plumbing for
   Key-Network is in place.
+- **v3 P6** — **Key-Network.** The cache stores entire trained
+  subgraphs as items, and the carver composes them. `NetworkItem`
+  joins `EmbeddingItem` under `CachedItem`; `CachedNetworkPrimitive`
+  exposes a stored carving to the outer carver as just another
+  deterministic primitive. The carver's `inferInputs` for cached
+  networks is forward-evaluation: try each anchor, see which
+  produces the target. With two pre-trained inner networks
+  (`hot→cold` and `cold→freeze`) and an outer mandate
+  `result='freeze'` with root `'hot'`, the carver builds a two-step
+  composed pipeline automatically — no shortcuts available because
+  the inner vocabularies are disjoint at the input atom. The "values
+  are networks" reframing of KV is real, and lives inside the
+  framework as just one more variant of one more interface.
 
 All implementation is in Java 25. MLPs and transformer blocks are
 written from scratch (~500 lines including backprop) with no
@@ -129,6 +142,7 @@ In dependency order — each builds on the previous:
 | [`08-inline-mandate-driven-training.md`](docs/08-inline-mandate-driven-training.md) | Mandates drive training inline; four mandate roles over one machinery |
 | [`09-carver-driven-end-to-end.md`](docs/09-carver-driven-end-to-end.md) | Carver assembles the KV-cache pipeline; generic InlineTrainer; no hand-wired graph |
 | [`10-multi-head-kv.md`](docs/10-multi-head-kv.md) | Multi-head KV; per-source forward anchors; edge-stats feedback; three-session diagnostic |
+| [`11-key-network.md`](docs/11-key-network.md) | Key-Network: cached subgraphs as `CachedItem`; carver composes two stored networks |
 
 ## What has been demonstrated
 
@@ -228,6 +242,22 @@ In dependency order — each builds on the previous:
   the `CachedItem` scaffold that reserves the slot for `NetworkItem`
   — the actual Key-Network landing.
 
+- **Key-Network: cached subgraphs composed by the carver** ([11](docs/11-key-network.md)).
+  The cache stores trained subgraphs as items. `NetworkItem` joins
+  `EmbeddingItem` under the sealed `CachedItem` interface;
+  `CachedNetworkPrimitive` wraps a `NetworkItem` and presents it to
+  the outer carver as a regular deterministic primitive. Two pre-
+  trained inner networks (`hot→cold` and `cold→freeze`, with disjoint
+  vocabularies at the input atom to prevent shortcuts) sit in an
+  outer TransformationGraph; the outer mandate `result='freeze'` with
+  root `'hot'` is satisfied by a two-step pipeline the carver
+  composes: `ROOT → hotCold → coldFreeze → output`. The substrate
+  returns *behaviours* now, not just vectors; the carver retrieves
+  by structural fit to the mandate; composition uses the same
+  Primitive/Carver machinery as anything else. No new abstraction
+  layer was needed — one new `CachedItem` variant plus an
+  `inferInputs` case in the carver.
+
 ## Known limitations
 
 These are real and worth being explicit about:
@@ -268,29 +298,32 @@ v3 phase 1 (KV-cache foundation) opened a parallel research line; phase 2
 that substrate. The remaining v3 questions split across the symbolic and
 the cache lines:
 
-**KV-cache line (toward Key-Network):**
+**Beyond Key-Network:**
 
-1. **`NetworkItem` and `CachedNetworkPrimitive`.** A `CachedItem`
-   variant that holds a frozen `CarvingResult` plus trained-state
-   snapshot. A `Primitive` that wraps it and exposes a stored
-   carving as a single-call function. The carver can then use prior
-   carvings as building blocks. **This is the Key-Network milestone.**
+1. **Autograd across cached-network boundaries.** Phase 6 composes
+   pre-trained inner networks; gradients don't flow from the outer
+   mandate back through them. The deferred step now has concrete
+   motivation: a `Primitive.backward(outputGrad) → inputGrad` contract
+   would let the outer training loop tune inner networks even after
+   they're cached. End-to-end differentiability *within a carved
+   graph* relaxes the framework's standing "not differentiable
+   end-to-end" claim.
 
-2. **Multi-trainable end-to-end.** With `NetworkItem`-bearing
-   carvings wired into bigger carvings, gradient flow across the
-   primitive boundary becomes the real question. Autograd on the
-   carving graph; primitive-level `backward(outputGrad) → inputGrad`.
+2. **`NetworkCache` and explicit key lookup.** A first-class cache
+   that stores many `NetworkItem`s and exposes them via a
+   `LookupNetwork(key) → NetworkItem` primitive — analogous to how
+   `LookupSymbol` retrieves a vector by key. The carver chooses
+   *which* network to retrieve from a much larger substrate.
 
 3. **Emergent head specialization (phase 5b).** Phase 5 hand-biases
-   edge stats. The natural follow-up: run N sessions with random
-   init and equal initial stats; show that edge-stat feedback alone
-   makes heads specialize over a mandate sequence (one head ends up
-   handling one task family, the other another). The substrate
-   learns the assignment.
+   edge stats. The follow-up: run N sessions with random init and
+   equal initial stats; watch heads specialize over a mandate
+   sequence via edge-stat feedback alone. The infrastructure is
+   already in place.
 
 4. **Learned similarity (Q-W-Kᵀ).** Phases 1–5 use fixed cosine.
    Adding a learned scoring function turns similarity itself into a
-   trainable component — the natural next cache variant.
+   trainable component — natural next cache variant.
 
 **Symbolic line:**
 
@@ -359,6 +392,7 @@ Available demos, ordered by dependency:
 | `InlineTrainingDemo`          | v3 P3    | Inline mandate-driven training: 25-step convergence from random W |
 | `CarverEndToEndDemo`          | v3 P4    | Carver assembles KV pipeline; generic InlineTrainer; no hand-wired graph |
 | `MultiHeadCarvedDemo`         | v3 P5    | Two parallel KV chains; carver picks via edge stats; independent specialization |
+| `KeyNetworkDemo`              | v3 P6    | Cached subgraphs as substrate items; carver composes two stored networks |
 
 ## Repository layout
 

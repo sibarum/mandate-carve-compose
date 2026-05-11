@@ -5,6 +5,7 @@ import sibarum.strnn.computation.ComputationGraph;
 import sibarum.strnn.computation.SlotSource;
 import sibarum.strnn.mandate.Mandate;
 import sibarum.strnn.mandate.MandateSet;
+import sibarum.strnn.cache.CachedNetworkPrimitive;
 import sibarum.strnn.cache.EmbedSymbol;
 import sibarum.strnn.cache.LookupSymbol;
 import sibarum.strnn.cache.VectorTransform;
@@ -133,7 +134,8 @@ public final class BackwardChainingCarver {
         return new CarvingResult(
                 cg,
                 List.copyOf(state.tracedEdges),
-                Map.copyOf(state.simulatedValues));
+                Map.copyOf(state.simulatedValues),
+                List.copyOf(state.rootBindings));
     }
 
     private boolean alreadyProduced(State state, Value target) {
@@ -381,6 +383,30 @@ public final class BackwardChainingCarver {
             if (anchor != null) return List.of(anchor);
             return null;
         }
+        if (prim instanceof CachedNetworkPrimitive cnp) {
+            // Deterministic cached subgraph. Find an input anchor of the
+            // right type such that the cached network's forward evaluation
+            // produces the target. Tries the root input first, then every
+            // per-source forward anchor of the right type. This lets the
+            // carver chain cached networks: anchor at the output of an
+            // upstream cached network feeds the input of a downstream one.
+            ValueType wantType = cnp.item().inputType();
+            if (target.type() != cnp.item().outputType()) return null;
+            if (state.rootAnchor != null && state.rootAnchor.type() == wantType) {
+                Value out = safeApply(cnp, state.rootAnchor);
+                if (out != null && ValueDistance.matches(out, target, 1e-6)) {
+                    return List.of(state.rootAnchor);
+                }
+            }
+            for (Value v : state.forwardAnchorsByNode.values()) {
+                if (v.type() != wantType) continue;
+                Value out = safeApply(cnp, v);
+                if (out != null && ValueDistance.matches(out, target, 1e-6)) {
+                    return List.of(v);
+                }
+            }
+            return null;
+        }
         if (prim instanceof ParseNumber && target instanceof NumberValue(double n)) {
             String s = isInteger(n) ? Integer.toString((int) Math.round(n)) : Double.toString(n);
             return List.of(new StringValue(s));
@@ -560,6 +586,19 @@ public final class BackwardChainingCarver {
     }
 
     /**
+     * Forward-apply a CachedNetworkPrimitive against one input value,
+     * catching any runtime failure (dim mismatch, type mismatch from an
+     * inner primitive, etc.). Returns null on failure.
+     */
+    private static Value safeApply(CachedNetworkPrimitive cnp, Value input) {
+        try {
+            return cnp.apply(List.of(input));
+        } catch (RuntimeException ignored) {
+            return null;
+        }
+    }
+
+    /**
      * Find any anchor value of the given type. Used for joining-primitive
      * forward propagation when we don't yet know which specific source feeds
      * which slot. Returns the root input if it matches; otherwise the first
@@ -637,6 +676,4 @@ public final class BackwardChainingCarver {
         }
     }
 
-    private record RootBinding(CompGraphNode node, int slot, Value value) {
-    }
 }
