@@ -31,6 +31,25 @@ public final class EdgeStats {
         pruned = true;
     }
 
+    /**
+     * Hand-bias the mean score. Used by demos to pre-seed the carver's
+     * preferences before any natural updates have accumulated. Prefer
+     * {@link #update} for the normal learning loop.
+     */
+    public synchronized void setMeanScore(double score) {
+        this.meanScore = score;
+    }
+
+    /**
+     * Clear accumulated stats back to a fresh state. Used by multi-session
+     * demos that want to re-bias between runs without rebuilding the TG.
+     */
+    public synchronized void reset() {
+        this.meanScore = 0.5;
+        this.samples = 0;
+        this.pruned = false;
+    }
+
     @Override
     public synchronized String toString() {
         return String.format("EdgeStats(score=%.3f, n=%d%s)",

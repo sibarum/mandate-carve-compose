@@ -163,7 +163,7 @@ public final class BackwardChainingCarver {
 
         for (TransformationNode cand : candidates) {
             if (cand.primitive() instanceof sibarum.strnn.primitive.Terminal) continue;
-            List<Value> inputs = inferInputs(cand.primitive(), target, state);
+            List<Value> inputs = inferInputs(cand, target, state);
             if (inputs == null) continue;
 
             int snapNodes = state.nodes.size();
@@ -246,7 +246,7 @@ public final class BackwardChainingCarver {
 
             if (pathContains(targetPath, target, cand.primitive().getClass())) continue;
 
-            List<Value> inputs = inferInputs(cand.primitive(), target, state);
+            List<Value> inputs = inferInputs(cand, target, state);
             if (inputs == null) continue;
 
             int snapNodes = state.nodes.size();
@@ -339,7 +339,7 @@ public final class BackwardChainingCarver {
     }
 
     private boolean candidateProducesMandateValue(State state, TransformationNode cand, Value target) {
-        List<Value> inputs = inferInputs(cand.primitive(), target, state);
+        List<Value> inputs = inferInputs(cand, target, state);
         if (inputs == null) return false;
         for (Value v : inputs) {
             for (Mandate m : state.mandates.mandates()) {
@@ -353,7 +353,8 @@ public final class BackwardChainingCarver {
         return false;
     }
 
-    private List<Value> inferInputs(Primitive prim, Value target, State state) {
+    private List<Value> inferInputs(TransformationNode candNode, Value target, State state) {
+        Primitive prim = candNode.primitive();
         if (prim instanceof Terminal) {
             return List.of(target);
         }
@@ -370,13 +371,14 @@ public final class BackwardChainingCarver {
                     .orElse(null);
         }
         if (prim instanceof VectorTransform vt && target instanceof MatrixValue) {
-            // Trainable: any type-compatible upstream value is acceptable. The
-            // forward anchor (the value reachable from rootInput by deterministic
-            // primitives) gives the carver a concrete input to recurse on.
-            Value anchor = state.forwardAnchors.get(ValueType.MATRIX);
-            if (anchor instanceof MatrixValue mv && mv.dim() == vt.inDim()) {
-                return List.of(anchor);
-            }
+            // Trainable: input doesn't need to be a specific value (the bridge
+            // learns to map whatever comes in). The carver needs *some* concrete
+            // matrix value of the right dim so solve() can recurse on it and
+            // terminate at the root. Pick the anchor produced by this node's
+            // TG-upstream candidate with the best edge stat — that's the head
+            // -aware choice when multiple parallel chains exist.
+            Value anchor = pickBridgeAnchor(state, candNode, vt.inDim());
+            if (anchor != null) return List.of(anchor);
             return null;
         }
         if (prim instanceof ParseNumber && target instanceof NumberValue(double n)) {
@@ -508,18 +510,25 @@ public final class BackwardChainingCarver {
 
     /**
      * Walk forward from the rootInput through non-Terminal primitives until
-     * fixpoint, recording one representative value per output type. The
-     * anchor is used by solve() as a concrete value to recurse on when the
-     * candidate primitive can't (or shouldn't) be inverted exactly — most
-     * notably trainable primitives, whose input doesn't need to be a specific
-     * value (they'll learn to map whatever comes in).
+     * fixpoint, recording the value each node would produce given the
+     * current substrate state. The map is keyed by {@code TransformationNode}
+     * so multi-head substrates (multiple nodes producing the same {@link
+     * ValueType}) keep distinct anchors per source.
      *
-     * Trainables are included in the walk: their current forward function is
-     * well-defined, and we only need a value of the right type at the right
-     * position. First-found-per-type wins.
+     * Trainables are included: their current forward function is well-defined,
+     * and we only need a concrete value of the right type at the right
+     * position for {@code solve()} to recurse on.
+     *
+     * When a node has multiple input types and any are missing, we use one
+     * anchor per type from {@link #anchorByType(State, ValueType)} — first-found
+     * across all per-node anchors. This is best-effort for joining primitives;
+     * for the multi-head case (one-input-slot trainables), the per-node anchor
+     * is what matters.
      */
     private void precomputeForwardAnchors(State state) {
-        state.forwardAnchors.put(state.rootInput.type(), state.rootInput);
+        // root input is special — index it under a synthetic ROOT marker so
+        // lookups by-type still find it.
+        state.rootAnchor = state.rootInput;
         boolean changed = true;
         int guard = 0;
         while (changed && guard++ < 32) {
@@ -527,11 +536,11 @@ public final class BackwardChainingCarver {
             for (TransformationNode tn : state.tg.nodes()) {
                 Primitive p = tn.primitive();
                 if (p instanceof Terminal) continue;
-                if (state.forwardAnchors.containsKey(tn.outputType())) continue;
+                if (state.forwardAnchorsByNode.containsKey(tn)) continue;
                 List<Value> ins = new ArrayList<>();
                 boolean ok = true;
                 for (ValueType t : tn.inputTypes()) {
-                    Value v = state.forwardAnchors.get(t);
+                    Value v = anchorByType(state, t);
                     if (v == null) {
                         ok = false;
                         break;
@@ -541,13 +550,60 @@ public final class BackwardChainingCarver {
                 if (!ok) continue;
                 try {
                     Value out = p.apply(ins);
-                    state.forwardAnchors.put(tn.outputType(), out);
+                    state.forwardAnchorsByNode.put(tn, out);
                     changed = true;
                 } catch (RuntimeException ignored) {
                     // primitive couldn't accept these inputs at runtime; skip
                 }
             }
         }
+    }
+
+    /**
+     * Find any anchor value of the given type. Used for joining-primitive
+     * forward propagation when we don't yet know which specific source feeds
+     * which slot. Returns the root input if it matches; otherwise the first
+     * matching per-node anchor.
+     */
+    private static Value anchorByType(State state, ValueType t) {
+        if (state.rootAnchor != null && state.rootAnchor.type() == t) return state.rootAnchor;
+        for (Value v : state.forwardAnchorsByNode.values()) {
+            if (v.type() == t) return v;
+        }
+        return null;
+    }
+
+    /**
+     * For a trainable bridge candidate (a {@link VectorTransform}), pick the
+     * forward anchor of an upstream TG-source. Prefers upstreams ranked by
+     * edge-stat score on the {@code (upstream → bridge)} edge — so when the
+     * substrate has multiple parallel chains, the bridge gets paired with the
+     * head whose edge has been reinforced.
+     *
+     * Falls back to any matrix anchor of the right dimensionality.
+     */
+    private Value pickBridgeAnchor(State state, TransformationNode bridgeNode, int wantDim) {
+        // Rank incoming TG edges by stat score (highest first).
+        List<TransformationEdge> incoming = new ArrayList<>(state.tg.incoming(bridgeNode));
+        incoming.sort(Comparator.comparingDouble((TransformationEdge e) ->
+                e.stats().isPruned() ? Double.NEGATIVE_INFINITY : e.stats().score()).reversed());
+        for (TransformationEdge e : incoming) {
+            if (e.stats().isPruned()) continue;
+            Value anchor = state.forwardAnchorsByNode.get(e.from());
+            if (anchor instanceof MatrixValue mv && mv.dim() == wantDim) return anchor;
+            // root-fed bridges: source has no anchor entry but root is the source
+            if (anchor == null && state.rootAnchor instanceof MatrixValue rm && rm.dim() == wantDim
+                    && state.rootInput.type() == e.from().outputType()) {
+                return rm;
+            }
+        }
+        // Fallback: any matrix anchor of the right dim. Lets the carver still
+        // recover if the TG topology doesn't point at a viable upstream.
+        for (Value v : state.forwardAnchorsByNode.values()) {
+            if (v instanceof MatrixValue mv && mv.dim() == wantDim) return v;
+        }
+        if (state.rootAnchor instanceof MatrixValue rm && rm.dim() == wantDim) return rm;
+        return null;
     }
 
     private static final class State {
@@ -559,7 +615,11 @@ public final class BackwardChainingCarver {
         final List<RootBinding> rootBindings = new ArrayList<>();
         final Map<CompGraphNode, Value> simulatedValues = new HashMap<>();
         final Set<CompGraphNode> completed = new HashSet<>();
-        final Map<ValueType, Value> forwardAnchors = new HashMap<>();
+        // Per-source forward anchors. Keyed by TransformationNode so multi-head
+        // substrates keep parallel-chain anchors separate. The root input is
+        // stored separately under rootAnchor (no TransformationNode for it).
+        final Map<TransformationNode, Value> forwardAnchorsByNode = new HashMap<>();
+        Value rootAnchor;
         int budget;
         int uid = 0;
 

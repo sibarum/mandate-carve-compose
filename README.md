@@ -94,6 +94,18 @@ runnable; each closes with a written-up diagnostic.
   call: framework builds the graph, trains the bridge, verifies the
   result. Scope: one trainable per gradient path; multi-trainable
   end-to-end (autograd-on-the-carving) remains deferred.
+- **v3 P5** — Multi-head KV. Two parallel cache chains coexist in
+  one substrate; the carver picks among them via edge stats; inline
+  training tunes whichever chain was picked; chains retain
+  independent specialization across mandate switches. Adds the
+  `CachedItem` scaffold (reserves the type slot for `NetworkItem`
+  later), source-aware forward anchors in the carver (per-source
+  rather than per-type), and edge-stats feedback from the trainer
+  (per-session reward → traced-edge updates). Three-session
+  diagnostic: chain A trains hot→cold; chain B trains hot→warm;
+  chain A re-verifies hot→cold in **zero** steps (no further
+  training). The "multiple views, carver selects" plumbing for
+  Key-Network is in place.
 
 All implementation is in Java 25. MLPs and transformer blocks are
 written from scratch (~500 lines including backprop) with no
@@ -116,6 +128,7 @@ In dependency order — each builds on the previous:
 | [`07-similarity-based-rerouting.md`](docs/07-similarity-based-rerouting.md) | Emergent routing in a network, 2×2 (untrained/trained × split/downstream) diagnostic |
 | [`08-inline-mandate-driven-training.md`](docs/08-inline-mandate-driven-training.md) | Mandates drive training inline; four mandate roles over one machinery |
 | [`09-carver-driven-end-to-end.md`](docs/09-carver-driven-end-to-end.md) | Carver assembles the KV-cache pipeline; generic InlineTrainer; no hand-wired graph |
+| [`10-multi-head-kv.md`](docs/10-multi-head-kv.md) | Multi-head KV; per-source forward anchors; edge-stats feedback; three-session diagnostic |
 
 ## What has been demonstrated
 
@@ -200,6 +213,21 @@ In dependency order — each builds on the previous:
   multiple trainables share gradient flow is still deferred, but
   every other piece of "no hand-wiring" now works end-to-end.
 
+- **Multi-head KV with carver-driven selection** ([10](docs/10-multi-head-kv.md)).
+  Two parallel KV chains in one substrate (separate
+  `SymbolEmbeddingTable`s, `EmbedSymbol`s, `VectorTransform` bridges,
+  `LookupSymbol`s, shared terminal). The carver routes through
+  whichever chain edge stats prefer. Three-session diagnostic on the
+  same substrate: chain A trains `hot→cold` in 25 steps; chain B
+  trains `hot→warm` in 25 steps; chain A re-verifies `hot→cold` in
+  **0** steps — the chains are genuinely independent, training one
+  does not perturb the other. Adds source-aware forward anchors
+  (`Map<TransformationNode, Value>` so multiple TG nodes producing
+  the same `ValueType` keep distinct anchors per source), edge-stats
+  feedback from `InlineTrainer` (reward → traced-edge updates), and
+  the `CachedItem` scaffold that reserves the slot for `NetworkItem`
+  — the actual Key-Network landing.
+
 ## Known limitations
 
 These are real and worth being explicit about:
@@ -240,28 +268,29 @@ v3 phase 1 (KV-cache foundation) opened a parallel research line; phase 2
 that substrate. The remaining v3 questions split across the symbolic and
 the cache lines:
 
-**KV-cache line:**
+**KV-cache line (toward Key-Network):**
 
-1. **Multi-trainable end-to-end.** Phase 4 has one trainable per
-   carved gradient path. Extending to chained trainables requires
-   the framework to propagate `inputGradient` backward across primitive
-   boundaries — autograd-on-the-carving. The framework's "not
-   differentiable end-to-end" claim relaxes *within a carved graph*.
+1. **`NetworkItem` and `CachedNetworkPrimitive`.** A `CachedItem`
+   variant that holds a frozen `CarvingResult` plus trained-state
+   snapshot. A `Primitive` that wraps it and exposes a stored
+   carving as a single-call function. The carver can then use prior
+   carvings as building blocks. **This is the Key-Network milestone.**
 
-2. **Multiple KVs per symbol.** A single symbol carries multiple
-   embeddings (orthogonal "views"), all retrieved together. The carver
-   picks which view a given bridge attends to. Sidesteps the disambiguation
-   question by making "all views" the only addressable unit.
+2. **Multi-trainable end-to-end.** With `NetworkItem`-bearing
+   carvings wired into bigger carvings, gradient flow across the
+   primitive boundary becomes the real question. Autograd on the
+   carving graph; primitive-level `backward(outputGrad) → inputGrad`.
 
-3. **Learned similarity (Q-W-Kᵀ).** Phases 1–4 use fixed cosine.
+3. **Emergent head specialization (phase 5b).** Phase 5 hand-biases
+   edge stats. The natural follow-up: run N sessions with random
+   init and equal initial stats; show that edge-stat feedback alone
+   makes heads specialize over a mandate sequence (one head ends up
+   handling one task family, the other another). The substrate
+   learns the assignment.
+
+4. **Learned similarity (Q-W-Kᵀ).** Phases 1–5 use fixed cosine.
    Adding a learned scoring function turns similarity itself into a
    trainable component — the natural next cache variant.
-
-4. **Inline-train + edge-stats feedback.** Every successful inline
-   training run is also a vote of confidence in the placed bridges.
-   Feeding the trainer's success score back into `EdgeStats` would
-   let the carver learn over many sessions which bridges are worth
-   assembling — the "substrate learns from solving tasks" loop.
 
 **Symbolic line:**
 
@@ -329,6 +358,7 @@ Available demos, ordered by dependency:
 | `SimilarityRoutingDemo`       | v3 P2    | 2×2 routing diagnostic: untrained/trained × split/downstream |
 | `InlineTrainingDemo`          | v3 P3    | Inline mandate-driven training: 25-step convergence from random W |
 | `CarverEndToEndDemo`          | v3 P4    | Carver assembles KV pipeline; generic InlineTrainer; no hand-wired graph |
+| `MultiHeadCarvedDemo`         | v3 P5    | Two parallel KV chains; carver picks via edge stats; independent specialization |
 
 ## Repository layout
 

@@ -117,5 +117,32 @@ public final class InlineTrainer {
             int stepsTaken,
             List<StepRecord> trace,
             VerificationReport finalReport) {
+
+        /**
+         * Per-session reward derived from convergence. Demos that want to
+         * close the loop "successful carvings reinforce their edges" call
+         * {@code applyEdgeFeedback(carving, result.score())} after training.
+         * 1.0 for PASS, scaled-down for FAIL by how far from the budget the
+         * run got.
+         */
+        public double score(int maxSteps) {
+            if (converged) return 1.0;
+            if (maxSteps <= 0) return 0.0;
+            return Math.max(0.0, 1.0 - (double) stepsTaken / maxSteps) * 0.25;
+        }
+    }
+
+    /**
+     * Apply the trainer's reward to every edge the carver traced when
+     * assembling the graph. Closes the loop: carvings that succeed reinforce
+     * the edges they used; carvings that fail leave the substrate's edge
+     * stats nearly unchanged (a small penalty proportional to how short of
+     * convergence they came).
+     */
+    public static void applyEdgeFeedback(
+            sibarum.strnn.carving.CarvingResult carving, double reward) {
+        for (sibarum.strnn.transformation.TransformationEdge e : carving.tracedEdges()) {
+            e.stats().update(reward);
+        }
     }
 }
