@@ -384,22 +384,18 @@ public final class BackwardChainingCarver {
             return null;
         }
         if (prim instanceof CachedNetworkPrimitive cnp) {
-            // Deterministic cached subgraph. Find an input anchor of the
+            // Deterministic cached subgraph. Find an input value of the
             // right type such that the cached network's forward evaluation
-            // produces the target. Tries the root input first, then every
-            // per-source forward anchor of the right type. This lets the
-            // carver chain cached networks: anchor at the output of an
-            // upstream cached network feeds the input of a downstream one.
+            // produces the target. The reachable-values set
+            // (populated via BFS in the forward pre-pass) lets the carver
+            // chain N cached networks: a value reachable only after N-1
+            // applications of upstream primitives is still in the set and
+            // is a valid input candidate for this primitive.
             ValueType wantType = cnp.item().inputType();
             if (target.type() != cnp.item().outputType()) return null;
-            if (state.rootAnchor != null && state.rootAnchor.type() == wantType) {
-                Value out = safeApply(cnp, state.rootAnchor);
-                if (out != null && ValueDistance.matches(out, target, 1e-6)) {
-                    return List.of(state.rootAnchor);
-                }
-            }
-            for (Value v : state.forwardAnchorsByNode.values()) {
-                if (v.type() != wantType) continue;
+            Set<Value> candidates = state.reachableValuesByType.getOrDefault(
+                    wantType, Collections.emptySet());
+            for (Value v : candidates) {
                 Value out = safeApply(cnp, v);
                 if (out != null && ValueDistance.matches(out, target, 1e-6)) {
                     return List.of(v);
@@ -535,26 +531,39 @@ public final class BackwardChainingCarver {
     }
 
     /**
-     * Walk forward from the rootInput through non-Terminal primitives until
-     * fixpoint, recording the value each node would produce given the
-     * current substrate state. The map is keyed by {@code TransformationNode}
-     * so multi-head substrates (multiple nodes producing the same {@link
-     * ValueType}) keep distinct anchors per source.
+     * Walk forward from the rootInput. Two structures are populated:
      *
-     * Trainables are included: their current forward function is well-defined,
-     * and we only need a concrete value of the right type at the right
-     * position for {@code solve()} to recurse on.
+     *   forwardAnchorsByNode: one representative output per TransformationNode.
+     *   This drives trainable inversion (the bridge picks its upstream
+     *   anchor from its TG-incoming edge).
      *
-     * When a node has multiple input types and any are missing, we use one
-     * anchor per type from {@link #anchorByType(State, ValueType)} — first-found
-     * across all per-node anchors. This is best-effort for joining primitives;
-     * for the multi-head case (one-input-slot trainables), the per-node anchor
-     * is what matters.
+     *   reachableValuesByType: BFS over all values reachable from rootInput
+     *   by chaining any number of non-Terminal primitives. This is what
+     *   lets the carver chain cached networks N levels deep — for an
+     *   inversion of "primitive P needs an input that produces target",
+     *   we try every reachable value of the right type, not just the
+     *   root or one per-node anchor.
+     *
+     * Trainables are included in both: their current forward function is
+     * well-defined.
      */
     private void precomputeForwardAnchors(State state) {
-        // root input is special — index it under a synthetic ROOT marker so
-        // lookups by-type still find it.
         state.rootAnchor = state.rootInput;
+        state.reachableValuesByType
+                .computeIfAbsent(state.rootInput.type(), k -> new java.util.LinkedHashSet<>())
+                .add(state.rootInput);
+        // BFS reachability is only useful when the substrate contains
+        // primitives that compose deterministically over the input space
+        // (e.g., CachedNetworkPrimitive — Key-Network). Skipping it for
+        // substrates without such primitives keeps the pre-pass fast and
+        // bounded for the common KV-cache / trainable-bridge case.
+        boolean bfsEnabled = false;
+        for (TransformationNode tn : state.tg.nodes()) {
+            if (tn.primitive() instanceof CachedNetworkPrimitive) {
+                bfsEnabled = true;
+                break;
+            }
+        }
         boolean changed = true;
         int guard = 0;
         while (changed && guard++ < 32) {
@@ -562,24 +571,60 @@ public final class BackwardChainingCarver {
             for (TransformationNode tn : state.tg.nodes()) {
                 Primitive p = tn.primitive();
                 if (p instanceof Terminal) continue;
-                if (state.forwardAnchorsByNode.containsKey(tn)) continue;
-                List<Value> ins = new ArrayList<>();
-                boolean ok = true;
-                for (ValueType t : tn.inputTypes()) {
-                    Value v = anchorByType(state, t);
-                    if (v == null) {
-                        ok = false;
-                        break;
+
+                // Build the per-node anchor (one value per node, used by
+                // trainable inversion) if not already done.
+                if (!state.forwardAnchorsByNode.containsKey(tn)) {
+                    List<Value> ins = new ArrayList<>();
+                    boolean ok = true;
+                    for (ValueType t : tn.inputTypes()) {
+                        Value v = anchorByType(state, t);
+                        if (v == null) {
+                            ok = false;
+                            break;
+                        }
+                        ins.add(v);
                     }
-                    ins.add(v);
+                    if (ok) {
+                        try {
+                            Value out = p.apply(ins);
+                            state.forwardAnchorsByNode.put(tn, out);
+                            state.reachableValuesByType
+                                    .computeIfAbsent(out.type(), k -> new java.util.LinkedHashSet<>())
+                                    .add(out);
+                            changed = true;
+                        } catch (RuntimeException ignored) {
+                        }
+                    }
                 }
-                if (!ok) continue;
-                try {
-                    Value out = p.apply(ins);
-                    state.forwardAnchorsByNode.put(tn, out);
-                    changed = true;
-                } catch (RuntimeException ignored) {
-                    // primitive couldn't accept these inputs at runtime; skip
+
+                // BFS step: extend reachableValuesByType by trying every
+                // already-reachable input combination through this primitive.
+                // Restricted to single-input, non-Trainable primitives:
+                //   - Single-input: most cases (cached networks, lookups,
+                //     embed-style); multi-input would need a cross product
+                //     and is not needed for the current demos.
+                //   - Non-Trainable: a Trainable's forward function can
+                //     produce arbitrary continuous outputs that aren't
+                //     guaranteed to be near a vocabulary element. BFSing
+                //     through one would generate unbounded distinct matrix
+                //     values. Trainables still get their per-node anchor
+                //     above for solve()'s recursion to terminate on.
+                if (bfsEnabled && tn.inputTypes().size() == 1 && !(p instanceof Trainable)) {
+                    Set<Value> options = state.reachableValuesByType
+                            .getOrDefault(tn.inputTypes().getFirst(), Collections.emptySet());
+                    for (Value v : new ArrayList<>(options)) {
+                        try {
+                            Value out = p.apply(List.of(v));
+                            Set<Value> outSet = state.reachableValuesByType
+                                    .computeIfAbsent(out.type(), k -> new java.util.LinkedHashSet<>());
+                            if (outSet.size() >= 1024) continue;
+                            if (outSet.add(out)) {
+                                changed = true;
+                            }
+                        } catch (RuntimeException ignored) {
+                        }
+                    }
                 }
             }
         }
@@ -658,6 +703,11 @@ public final class BackwardChainingCarver {
         // substrates keep parallel-chain anchors separate. The root input is
         // stored separately under rootAnchor (no TransformationNode for it).
         final Map<TransformationNode, Value> forwardAnchorsByNode = new HashMap<>();
+        // All values reachable by chaining non-Terminal primitives forward
+        // from rootInput, indexed by type. Drives chained-composition
+        // inversion for deterministic primitives (most notably
+        // CachedNetworkPrimitive).
+        final Map<ValueType, Set<Value>> reachableValuesByType = new HashMap<>();
         Value rootAnchor;
         int budget;
         int uid = 0;

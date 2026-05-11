@@ -119,6 +119,19 @@ runnable; each closes with a written-up diagnostic.
   the inner vocabularies are disjoint at the input atom. The "values
   are networks" reframing of KV is real, and lives inside the
   framework as just one more variant of one more interface.
+- **v3 P8** — **Carver composes from the cache.** The NetworkCache's
+  inventory becomes the substrate. Hand `cache.primitives()` to a
+  TransformationGraphBuilder; submit a mandate; the carver assembles
+  a chain of cached networks of whatever depth is required. Three
+  mandates over the same 3-network cache produce three different
+  composed chains: `hot→cold` (1-step), `hot→freeze` (2-step via
+  composition), `hot→ice` (3-step via composition). Adds BFS
+  reachability to the carver's forward-anchor pre-pass (conditional
+  on the substrate containing `CachedNetworkPrimitive`s — needed for
+  N-step composition) and two-phase regularized bridge training to
+  `NetworkCache` (Phase 1: identity-on-vocabulary; Phase 2: positive
+  shift with identity maintenance — blocks cross-cache shortcuts
+  from rank-1 linear bridge extrapolation).
 - **v3 P7** — **NetworkCache: a cache that learns its own inventory.**
   `NetworkCache` is a stateful cache of `NetworkItem`s with
   spawn-on-demand training. Start empty; each `(input → output)` pair
@@ -156,6 +169,7 @@ In dependency order — each builds on the previous:
 | [`10-multi-head-kv.md`](docs/10-multi-head-kv.md) | Multi-head KV; per-source forward anchors; edge-stats feedback; three-session diagnostic |
 | [`11-key-network.md`](docs/11-key-network.md) | Key-Network: cached subgraphs as `CachedItem`; carver composes two stored networks |
 | [`12-network-cache.md`](docs/12-network-cache.md) | NetworkCache: stateful cache of trained subgraphs; spawn-on-demand; eviction by success |
+| [`13-carver-composes-from-cache.md`](docs/13-carver-composes-from-cache.md) | Carver composes from the cache's inventory; N-step composition via BFS reachability |
 
 ## What has been demonstrated
 
@@ -421,6 +435,7 @@ Available demos, ordered by dependency:
 | `MultiHeadCarvedDemo`         | v3 P5    | Two parallel KV chains; carver picks via edge stats; independent specialization |
 | `KeyNetworkDemo`              | v3 P6    | Cached subgraphs as substrate items; carver composes two stored networks |
 | `NetworkCacheTrainingDemo`    | v3 P7    | NetworkCache builds inventory from data; bounded variant evicts by success |
+| `CarverFromCacheDemo`         | v3 P8    | Carver composes from cache inventory; N-step compositions per mandate |
 
 ## Repository layout
 

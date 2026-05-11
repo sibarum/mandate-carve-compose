@@ -17,6 +17,7 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.Set;
@@ -103,6 +104,19 @@ public final class NetworkCache {
     }
 
     /**
+     * The (input atom -> output atom) mapping for each stored entry. Used
+     * for inventory inspection and for BFS-style reasoning over the cache
+     * (e.g., "what atoms are reachable from this root?").
+     */
+    public Map<String, String> mappings() {
+        Map<String, String> out = new LinkedHashMap<>();
+        for (Map.Entry<String, Entry> e : entries.entrySet()) {
+            out.put(e.getKey(), e.getValue().outputAtom);
+        }
+        return out;
+    }
+
+    /**
      * Execute the network keyed by {@code key} against the given input, if
      * one exists. Returns empty if there is no such entry. Increments the
      * entry's success count when called (querying counts as use).
@@ -139,7 +153,7 @@ public final class NetworkCache {
             // Existing entry no longer satisfies; replace it.
         }
         NetworkItem item = trainNew(inputAtom, outputAtom);
-        Entry e = new Entry(item, 1);
+        Entry e = new Entry(item, outputAtom, 1);
         entries.put(inputAtom, e);
         spawnCounter++;
         enforceMax();
@@ -155,9 +169,48 @@ public final class NetworkCache {
         List<CachedNetworkPrimitive> out = new ArrayList<>(entries.size());
         for (Map.Entry<String, Entry> e : entries.entrySet()) {
             out.add(new CachedNetworkPrimitive(
-                    "net@" + e.getKey(), e.getValue().item));
+                    "net_" + e.getKey() + "_to_" + e.getValue().outputAtom,
+                    e.getValue().item));
         }
         return out;
+    }
+
+    /**
+     * BFS over the cache's (input -> output) graph from {@code root}.
+     * Returns the set of atoms reachable from root by following any
+     * number of cached mappings, plus the longest-path "frontier" atom
+     * (the atom found at maximum BFS depth — useful when the cache
+     * needs to spawn a new bridge to extend its reach).
+     */
+    public Reachability bfsFrom(String root) {
+        Set<String> reachable = new java.util.LinkedHashSet<>();
+        reachable.add(root);
+        List<String> frontier = new ArrayList<>();
+        frontier.add(root);
+        String deepestNonRoot = null;
+        while (!frontier.isEmpty()) {
+            List<String> nextFrontier = new ArrayList<>();
+            for (String atom : frontier) {
+                Entry e = entries.get(atom);
+                if (e == null) continue;
+                String next = e.outputAtom;
+                if (reachable.add(next)) {
+                    nextFrontier.add(next);
+                    deepestNonRoot = next;
+                }
+            }
+            frontier = nextFrontier;
+        }
+        return new Reachability(reachable, deepestNonRoot == null ? root : deepestNonRoot);
+    }
+
+    /**
+     * Result of a BFS over the cache. {@code reachable} is the set of
+     * atoms reachable from the BFS root by following cached mappings.
+     * {@code frontier} is the deepest atom in that set (or root itself
+     * if root has no outgoing entry).
+     */
+    public record Reachability(Set<String> reachable, String frontier) {
     }
 
     private NetworkItem trainNew(String inputAtom, String outputAtom) {
@@ -186,13 +239,58 @@ public final class NetworkCache {
                     "NetworkCache could not carve a network for '"
                             + inputAtom + "' -> '" + outputAtom + "'");
         }
-        InlineTrainer.Result tr = new InlineTrainer(
-                carving, mandates, /* lr */ 0.1, /* maxSteps */ 500, /* checkEvery */ 25).run();
-        if (!tr.converged()) {
-            throw new IllegalStateException(
-                    "NetworkCache training did not converge for '"
-                            + inputAtom + "' -> '" + outputAtom + "'");
+
+        // Two-phase training that prevents the cross-cache shortcut:
+        //
+        // Phase 1 — pre-shape the bridge toward identity on every atom in
+        //   the vocabulary. This overcomes the random Xavier init and
+        //   gives the bridge a known starting structure (W ≈ I) before
+        //   the targeted shift is applied. Without this phase, the
+        //   subsequent positive training collapses W to a rank-1 outer
+        //   product (output - 0) · input^T / |input|^2 and the bridge
+        //   generalizes to *anything* aligned with the input atom — the
+        //   shortcut behaviour that originally broke this demo.
+        //
+        // Phase 2 — train (input → output) while continuously reinforcing
+        //   identity on the remaining vocab atoms. The bridge ends up as
+        //   "identity + targeted shift on input": bridge(embed(input)) ≈
+        //   embed(output), bridge(embed(other)) ≈ embed(other).
+        List<String> identityAtoms = new ArrayList<>(vocabulary);
+        identityAtoms.removeIf(a -> a.equals(inputAtom) || a.equals(outputAtom));
+
+        // Phase 1: identity on every atom in vocab, including the input
+        // and output atoms (the positive shift hasn't started yet).
+        for (int epoch = 0; epoch < 300; epoch++) {
+            for (String d : vocabulary) {
+                bridge.apply(List.of(new sibarum.strnn.value.MatrixValue(table.embed(d))));
+                bridge.backward(new sibarum.strnn.value.MatrixValue(table.embed(d)));
+                bridge.step(0.1);
+            }
         }
+
+        // Phase 2: positive shift + maintained identity on non-trained atoms.
+        for (int epoch = 0; epoch < 500; epoch++) {
+            // Positive: input -> output
+            bridge.apply(List.of(new sibarum.strnn.value.MatrixValue(table.embed(inputAtom))));
+            bridge.backward(new sibarum.strnn.value.MatrixValue(table.embed(outputAtom)));
+            bridge.step(0.1);
+            // Maintain identity on the rest
+            for (String d : identityAtoms) {
+                bridge.apply(List.of(new sibarum.strnn.value.MatrixValue(table.embed(d))));
+                bridge.backward(new sibarum.strnn.value.MatrixValue(table.embed(d)));
+                bridge.step(0.05);
+            }
+        }
+
+        // Verify the positive mapping holds end-to-end through the carving
+        sibarum.strnn.value.Value finalCheck = carving.graph().execute();
+        String got = ((StringValue) finalCheck).s();
+        if (!got.equals(outputAtom)) {
+            throw new IllegalStateException(
+                    "NetworkCache training did not satisfy '"
+                            + inputAtom + "' -> '" + outputAtom + "': got '" + got + "'");
+        }
+
         return NetworkItem.fromCarving(carving, ValueType.STRING, ValueType.STRING);
     }
 
@@ -221,10 +319,12 @@ public final class NetworkCache {
 
     private static final class Entry {
         final NetworkItem item;
+        final String outputAtom;
         int successCount;
 
-        Entry(NetworkItem item, int successCount) {
+        Entry(NetworkItem item, String outputAtom, int successCount) {
             this.item = item;
+            this.outputAtom = Objects.requireNonNull(outputAtom);
             this.successCount = successCount;
         }
     }
