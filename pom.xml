@@ -10,6 +10,7 @@
     <packaging>pom</packaging>
     <modules>
         <module>strnn-model</module>
+        <module>mcc-elden-ring</module>
     </modules>
 
     <properties>

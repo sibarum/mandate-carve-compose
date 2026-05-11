@@ -5,6 +5,7 @@ import sibarum.strnn.carving.CarvingResult;
 import sibarum.strnn.mandate.Mandate;
 import sibarum.strnn.mandate.MandateSet;
 import sibarum.strnn.primitive.StringOutputPrimitive;
+import sibarum.strnn.store.NetworkStore;
 import sibarum.strnn.training.InlineTrainer;
 import sibarum.strnn.transformation.TransformationGraph;
 import sibarum.strnn.transformation.TransformationGraphBuilder;
@@ -41,7 +42,7 @@ import java.util.Set;
  * Both succeed when an existing network handles the request; only the
  * second can change the cache's contents.
  */
-public final class NetworkCache {
+public final class NetworkCache implements NetworkStore {
     private final int dim;
     private final List<String> vocabulary;
     private final long seedBase;
@@ -92,9 +93,15 @@ public final class NetworkCache {
     }
 
     /** Read-only: return the NetworkItem keyed by {@code key}, or empty. */
+    @Override
     public Optional<NetworkItem> get(String key) {
         Entry e = entries.get(key);
         return e == null ? Optional.empty() : Optional.of(e.item);
+    }
+
+    @Override
+    public boolean contains(String key) {
+        return entries.containsKey(key);
     }
 
     /** Per-entry success count — useful for diagnostics. */

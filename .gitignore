@@ -40,3 +40,8 @@ build/
 
 # Claude
 .claude/
+
+# Downloads
+download/en_ewt-ud-train.conllu
+download/proper-nouns-00000-of-00001.parquet
+download/Lexicanum_Warhammer_RAG-v1.12.txt
