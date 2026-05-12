@@ -62,11 +62,12 @@ public final class BioCrossEntryDemo {
     private static final int NUM_LABELS = 3;
 
     private static final int EMBED_DIM = 32;
-    private static final int WINDOW_RADIUS = 1;
-    private static final int POS_HIDDEN_DIM = 64;
+    private static final int WINDOW_RADIUS = 2;
+    private static final int[] POS_HIDDEN = {128};
+    private static final boolean POS_SHAPE_FEATURES = true;
     private static final int ENTITY_HIDDEN_DIM = 32;
     private static final long SEED = 42L;
-    private static final int POS_EPOCHS = 5;
+    private static final int POS_EPOCHS = 8;
     private static final int PRETRAIN_EPOCHS = 3;
     private static final int FINETUNE_EPOCHS = 60;
     private static final double POS_LR = 0.01;
@@ -124,8 +125,8 @@ public final class BioCrossEntryDemo {
         System.out.println("=== Layer 1: POS tagger ===");
         TrainedPosLayer pos = PosTrainer.train(
                 ConlluParser.parse(conllu), extraVocab,
-                EMBED_DIM, WINDOW_RADIUS, POS_HIDDEN_DIM,
-                SEED, POS_EPOCHS, POS_LR);
+                EMBED_DIM, WINDOW_RADIUS, POS_HIDDEN,
+                SEED, POS_EPOCHS, POS_LR, POS_SHAPE_FEATURES);
         int contextDim = pos.contextDim;
         int posDim = PosTagset.size();
         int entityInputDim = contextDim + posDim;
@@ -250,6 +251,8 @@ public final class BioCrossEntryDemo {
         System.out.println("  BioWithProperNounsDemo (Parquet stage 1):             ~10.5%, 54 spans");
         System.out.println("  BioWithLoreDemo (Parquet + self-mention Lexicanum):    ~14%, 77 spans");
         System.out.println("  BioCrossEntryDemo (cross-entry + density, no constraint): 13.0%, 67 spans");
+        System.out.println("  BioCrossEntryDemo (POS-constrained, 86%% POS):             6.5%, 45 spans");
+        System.out.println("  BioCrossEntryDemo (POS-constrained, 91%% POS - this run):  6.2%, 43 spans (cleaner upstream → fewer demotions needed)");
     }
 
     /** Apply POS-conditioned decoding to a raw BIO prediction sequence. */

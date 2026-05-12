@@ -30,11 +30,12 @@ import java.util.stream.Collectors;
 public final class PosTaggerTrainingDemo {
 
     private static final int EMBED_DIM = 32;
-    private static final int WINDOW_RADIUS = 1;
-    private static final int HIDDEN_DIM = 64;
+    private static final int WINDOW_RADIUS = 2;
+    private static final int[] HIDDEN_SIZES = {128};
     private static final long SEED = 42L;
-    private static final int EPOCHS = 5;
+    private static final int EPOCHS = 8;
     private static final double LR = 0.01;
+    private static final boolean USE_SHAPE_FEATURES = true;
 
     public static void main(String[] args) throws IOException {
         if (args.length < 1) {
@@ -57,7 +58,8 @@ public final class PosTaggerTrainingDemo {
 
         TrainedPosLayer pos = PosTrainer.train(
                 sentences, extraVocab,
-                EMBED_DIM, WINDOW_RADIUS, HIDDEN_DIM, SEED, EPOCHS, LR);
+                EMBED_DIM, WINDOW_RADIUS, HIDDEN_SIZES,
+                SEED, EPOCHS, LR, USE_SHAPE_FEATURES);
         System.out.println();
 
         // Inference on a sample Elden Ring sentence.

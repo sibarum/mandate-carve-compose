@@ -174,6 +174,23 @@ runnable; each closes with a written-up diagnostic.
   (`TextTokenize`, `ClassifierHead`), and the first end-to-end
   multi-layer backprop chain in the framework (POS loss flows
   through the context encoder into the embedding table).
+- **v3 P10 follow-up — POS layer improvement (iters 9–13).** The same
+  diagnose-then-name-the-mandate loop applied to the POS layer
+  itself, the bottleneck iter 8 identified. Added a dev-split + per-
+  tag confusion matrix to `PosTrainer` first (no architecture change),
+  then read what the diagnostic named: PROPN F1 = 0.328, 37% of gold
+  PROPN being mis-tagged NOUN. Mandate: deterministic word-shape
+  features (capitalization, all-caps, digit, hyphen, punct, length),
+  which raised dev accuracy 86.1% → 89.2%. Wider context window
+  *regressed* at the same MLP width — diagnostic: capacity-bound, not
+  unhelpful — bigger MLP (hidden 64 → 128) plus more epochs took it
+  to **90.9%**. The downstream re-run of `BioCrossEntryDemo` is the
+  payoff: the upstream BIO tagger now emits only 44 *raw* spans on
+  Ranni (down from 67), of which 43 are clean entities — the
+  POS-conditioned decode constraint demotes 1 token where it
+  previously demoted 22. **Improving the lower layer raised the
+  ceiling for the upper layer automatically**, which is the layered-
+  inspectability methodology paying off at the layer-stack level.
 
 All implementation is in Java 25. MLPs and transformer blocks are
 written from scratch (~500 lines including backprop) with no
@@ -201,7 +218,7 @@ In dependency order — each builds on the previous:
 | [`12-network-cache.md`](docs/12-network-cache.md) | NetworkCache: stateful cache of trained subgraphs; spawn-on-demand; eviction by success |
 | [`13-carver-composes-from-cache.md`](docs/13-carver-composes-from-cache.md) | Carver composes from the cache's inventory; N-step composition via BFS reachability |
 | [`14-grand-finale.md`](docs/14-grand-finale.md) | The grand finale: a substrate that builds itself from a stream of mandates |
-| [`15-mandate-as-methodology.md`](docs/15-mandate-as-methodology.md) | Eight iterations on real-world NLP; MCC as a development methodology, not just a framework |
+| [`15-mandate-as-methodology.md`](docs/15-mandate-as-methodology.md) | Eight iterations on real-world NLP + a five-iteration POS-layer follow-up; MCC as a development methodology |
 
 ## What has been demonstrated
 

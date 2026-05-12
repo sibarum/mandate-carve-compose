@@ -161,6 +161,107 @@ table, updating the rows for tokens that appeared in this context. The
 existing `Mlp.backward()` returned input gradient since v0 (with a
 `// not used in v0` comment); P10 actually uses it.
 
+## Phase 10 follow-up: improving the POS bottleneck (iters 9–13)
+
+Iteration 8 ended with a deliberate finding: the POS-conditioned decode
+constraint is **bounded by POS accuracy**. When the POS tagger mis-tags
+`concealed` as ADJ, the constraint can't filter it out. That made POS
+the named next-target, and the methodology says: improve the layer the
+diagnostic points at.
+
+The same loop runs at the POS layer itself.
+
+### Step 1 — build the diagnostic
+
+The POS trainer had no held-out evaluation; we couldn't tell *which*
+tags it was confusing without one. So before changing any architecture,
+the trainer was modified to:
+
+- carve off the last 10% of UD sentences as a deterministic dev split
+- print dev accuracy after every epoch
+- emit a per-tag P/R table + top off-diagonal confusions at the end
+
+This is the same "designing for inspectability" rule applied to the
+trainer instead of the model. No model change yet — just a measurement
+surface.
+
+### Step 2 — read the diagnostic
+
+| Tag | Baseline F1 | Failure mode |
+|-----|-------------|--------------|
+| PROPN | **0.328** | 36.7% of gold PROPN → predicted NOUN |
+| ADJ   | 0.726     | 14% → NOUN |
+| ADV   | 0.738     | scattered across ADP/NOUN/PROPN |
+| INTJ  | 0.074     | tiny support (78) — ignore |
+| X     | 0.000     | tiny support (10) — ignore |
+
+The dominant error by a wide margin is PROPN being mis-recognized as
+NOUN. The Elden Ring sample sentences confirmed it concretely —
+`Marika`, `Elden`, `Maliketh`, `Knives` were all mis-tagged. This is
+the kind of diagnostic that *names* a mandate: the embedding lookup
+loses capitalization, so any feature derived purely from the embedding
+is blind to the most reliable PROPN signal in English.
+
+### Step 3 — the iteration ladder
+
+Each row's "Diagnostic" column names the missing mandate that drove the
+*next* iteration.
+
+| # | Configuration | Dev acc | Diagnostic |
+|---|---------------|---------|------------|
+| 9  | + word-shape features (capitalization, all-caps, digit, hyphen, punct, length-bucket) | **89.2%** | PROPN→NOUN drops out of the top-10 confusions entirely; remaining errors are ADV / SCONJ context-driven |
+| 10 | + wider context window (radius 1 → 2), same hidden=64 | 88.4% | **Regression.** Wider input at the same MLP width is capacity-bound — "Marika"/"Ranni" both started mis-tagging as ADV |
+| 11 | + bigger MLP (hidden 64 → 128) at radius 2 | 89.7% | Vindicates the wider-window hypothesis: it was capacity-starved, not unhelpful |
+| 12 | + more epochs (5 → 8) | **90.9%** | Train-vs-dev gap starting to widen; remaining errors are semantic (ADJ↔NOUN↔VERB) — bounded by representation, not architecture |
+| 13 | re-run BioCrossEntryDemo with the iter-12 POS layer | 43 spans on Ranni | The downstream BIO tagger now produces 44 *raw* spans (down from 67) — all clean entities; constraint demotions go from 22 → 1 |
+
+The iteration-10 regression is itself a methodology lesson: **you don't
+always win by adding**. Reading the result with the same discipline
+("what mandate did the regression reveal?") said the window expansion
+was real but the MLP wasn't big enough to use it.
+
+### What changed downstream
+
+Comparing iter 8 (POS-constrained decode, 86% POS) to iter 13 (same
+decode, 91% POS):
+
+|                                  | iter 8 (86% POS) | iter 13 (91% POS) |
+|----------------------------------|------------------|-------------------|
+| Raw spans (pre-constraint)       | 67               | **44**            |
+| Constraint-demoted Bs            | 22               | **1**             |
+| Final constrained spans          | 45               | 43                |
+| Quality of remaining spans       | mixed            | uniformly clean entities |
+
+The headline number (final spans) moved by only 2, but the *internal
+dynamic* shifted decisively: the upstream BIO tagger became
+discriminating on its own — the decode constraint went from
+load-bearing to decorative. This is the methodology working at the
+layer-stack level: **improving the lower layer raises the ceiling of
+every layer above it, automatically**, because the upper layer is
+trained on the lower layer's outputs and inherits their quality.
+
+### What the diagnostic still names
+
+The iter-12 confusion matrix points at the next mandate without
+ambiguity:
+
+```
+top off-diagonal confusions (gold -> predicted):
+    ADJ    -> NOUN      221   (15.0% of gold ADJ)
+    VERB   -> NOUN      198   ( 6.8% of gold VERB)
+    NOUN   -> PROPN     146   ( 4.0% of gold NOUN)
+    ADV    -> NOUN      130   ( 8.4% of gold ADV)
+```
+
+These are *semantic* ambiguity (English really does let the same word
+play noun or verb or adjective by context). Shape features and wider
+windows can't fix them; they need either a stronger representation (a
+contextual embedding, not a lookup table) or a structured-decode
+mandate over the tag sequence itself ("if the previous tag is DET, the
+current tag is much more likely NOUN/ADJ than VERB"). That second
+option — BIO-transitions-over-POS as a Viterbi-style decode — is the
+next layer-improvement target named by the current diagnostic.
+
 ## Honest observations and limitations
 
 - **This isn't state-of-the-art NLP.** The training set is 14 hand-
