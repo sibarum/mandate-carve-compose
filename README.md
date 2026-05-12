@@ -217,6 +217,32 @@ runnable; each closes with a written-up diagnostic.
   for the data, not the architecture.** Infrastructure landed:
   `PosTransitions`, `BioTransitions`, generic `ViterbiDecoder`,
   `BookTitlesBioLoader`, `EldenJsonlBioLoader`, `ParquetPeekDemo`.
+- **v3 P10 follow-up — data-selection mandates (iters 18–21).**
+  Iter 17 found the right supervision, but at 258k Stage-1 tokens.
+  This sub-arc asks: *which subset of that signal is load-bearing,
+  and what mandates select it?* **Iter 18** (3-corpus gradient with
+  7-class output): +21 spans, but output classes collapsed under
+  Stage 2 fine-tuning — *gradient training is a representation tool,
+  not an output-class tool*. **Iter 19** (random budget-clip to ~80
+  spans per source): **78× less training, comparable result** —
+  established that most of the iter-17 signal wasn't load-bearing.
+  **Iter 20** (naive failure-driven curation): backfired because the
+  `two-word-propn` pattern flooded the budget (76/132 sentences) and
+  starved the longer-multi-word patterns that the targeted failures
+  actually needed. **Iter 21** (relaxed patterns + add book-titles
+  as a fourth corpus): **215 spans (best result of the arc), with
+  60× less training data than iter 17**. Book-titles, used
+  pattern-specifically for its rich multi-function-word internal
+  structure, supplied the supply iter 20 starved on. The methodology
+  lesson: **data-selection mandates are the same kind of artifact as
+  architecture mandates** — each is a named decision with an
+  ablate-able effect; the right corpus for a pattern is the one that
+  has the pattern; per-pattern balance matters more than richness.
+  Infrastructure landed: `EntityClasses`, `KnowledgeGraphBioLoader`,
+  `BioGradientSnapshotDemo`, `BioBudgetParitySnapshotDemo`,
+  `BioTargetedCurationSnapshotDemo`, `BioRelaxedCurationSnapshotDemo`,
+  `FullCorpusSnapshotDemo`, and side-by-side `snapshot-iter*.txt`
+  artifacts for review.
 
 All implementation is in Java 25. MLPs and transformer blocks are
 written from scratch (~500 lines including backprop) with no
@@ -244,7 +270,7 @@ In dependency order — each builds on the previous:
 | [`12-network-cache.md`](docs/12-network-cache.md) | NetworkCache: stateful cache of trained subgraphs; spawn-on-demand; eviction by success |
 | [`13-carver-composes-from-cache.md`](docs/13-carver-composes-from-cache.md) | Carver composes from the cache's inventory; N-step composition via BFS reachability |
 | [`14-grand-finale.md`](docs/14-grand-finale.md) | The grand finale: a substrate that builds itself from a stream of mandates |
-| [`15-mandate-as-methodology.md`](docs/15-mandate-as-methodology.md) | Eight iterations on real-world NLP + a five-iteration POS-layer follow-up; MCC as a development methodology |
+| [`15-mandate-as-methodology.md`](docs/15-mandate-as-methodology.md) | Twenty-one iterations on real-world NLP; MCC as a development methodology applied at both the architecture and data-selection layers |
 
 ## What has been demonstrated
 
@@ -558,6 +584,11 @@ Available demos, ordered by dependency:
 | `BioWithBookTitlesDemo`       | v3 P10   | Iter 15: 3-stage BIO with book-title span-coherence pretraining |
 | `BioWithViterbiDemo`          | v3 P10   | Iter 16: book-title pretrain + Viterbi over BIO with hand-set transitions |
 | `BioWithEldenJsonlDemo`       | v3 P10   | **Iter 17 — boundary problem resolved**: direct supervision from `elden_ring_final_train.jsonl` (11.7k labeled Q&A pairs) |
+| `FullCorpusSnapshotDemo`      | v3 P10   | Iter 17 inference written to `snapshot-iter17.txt` across all 5 storylines (44 items, 191 spans) |
+| `BioGradientSnapshotDemo`     | v3 P10   | Iter 18: 7-class corpus-gradient BIO (normal/fantasy/eldenring); class signal collapses under Stage 2 fine-tune |
+| `BioBudgetParitySnapshotDemo` | v3 P10   | Iter 19: 80-span-per-source budget; **78× less training, comparable result** to iter 17 |
+| `BioTargetedCurationSnapshotDemo` | v3 P10 | Iter 20: failure-driven biased clip with narrow patterns; backfires — the `two-word-propn` pattern floods the budget |
+| `BioRelaxedCurationSnapshotDemo` | v3 P10 | **Iter 21 — arc best**: relaxed patterns + book-titles as 4th corpus; 60× less training, +12.6% spans vs iter 17 |
 
 ## Repository layout
 

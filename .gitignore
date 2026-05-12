@@ -47,3 +47,6 @@ download/*.txt
 download/*.csv
 download/*.parquet
 download/*.jsonl
+
+# Demo logging/output
+snapshot*.txt

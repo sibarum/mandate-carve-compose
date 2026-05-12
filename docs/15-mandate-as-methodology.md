@@ -487,6 +487,252 @@ incremental progress, the diagnostic is often "we don't have the
 right supervision."** The right next move is to look for the data,
 not the architecture.
 
+### Iter 18 — corpus gradient (mixed result, class collapse observed)
+
+Premise: iter 17 used one corpus (Elden Ring JSONL) as Stage 1. But three
+corpora are available at increasing domain specificity — NLP-KnowledgeGraph
+(generic English), Lexicanum (fantasy genre), elden_ring_final_train.jsonl
+(Elden Ring). Rather than treating them as substitutes, use them as a
+gradient: a 7-class BIO head with separate B/I classes per corpus, so the
+model can express "this token looks generic-entity-ish" vs "fantasy-entity-ish"
+vs "specifically-Elden-Ring-entity-ish" instead of one binary entity decision.
+
+```
+O                              -- function words, verbs
+B-normal,    I-normal           -- from NLP-KG (generic English)
+B-fantasy,   I-fantasy           -- from Lexicanum cross-entry
+B-eldenring, I-eldenring         -- from JSONL + hand-annotations
+```
+
+Stage 1 mixed all three (~517k tokens). Stage 2 fine-tuned 60 epochs on
+hand-annotated items only (eldenring-class).
+
+**Result: +21 spans across the corpus (191 → 212), with the class signal
+collapsed.** Of 216 B-* predictions, 214 were B-eldenring, 2 were B-normal,
+0 were B-fantasy. The 60 eldenring-only fine-tune epochs overrode the
+output head's class signal from Stage 1 — classic catastrophic forgetting of
+output classes.
+
+**The mixed-bag detail:**
+
+| Item | iter 17 | iter 18 |
+|------|---------|---------|
+| Remembrance of the Baleful Shadow | one span (correct) | "Remembrance of" only (regression) |
+| House Caria                       | captured            | gone                              |
+| Two Fingers                       | split as "Two" + "Fingers" | one span (correct)         |
+| Rune of Death                     | not found           | captured (new)                    |
+| Nokron / Tarnished                | partial             | captured cleanly                  |
+
+The pattern: tokens that look generic-entity-like across multiple corpora
+(like the article `the` inside "Remembrance of the Baleful Shadow") got
+pulled toward O by the dominant non-entity signal across NLP-KG +
+Lexicanum, *even though* the entity-specific signal from JSONL would have
+labeled them as I-eldenring. The shared embedding table is the conduit:
+gradient updates from multiple corpora's training pull the embedding in
+multiple directions on shared function-word tokens.
+
+**Where iter 18 quietly helps anyway:** the new entities surfaced (Rune
+of Death, Nokron, Tarnished, the corrected Two Fingers) came from the
+broader pattern exposure during Stage 1. The model learned to recognize
+"this looks like an entity" more broadly, even though the class signal
+collapsed at the output. Representation learning from the gradient
+worked; output-class learning didn't survive Stage 2.
+
+**Methodology lesson:** **gradient training is a representation tool,
+not an output-class tool**, unless Stage 2 is changed to preserve class
+supervision. Three concrete fix paths the diagnostic names:
+
+1. Freeze the output head during Stage 2 — only update internal
+   representations from hand-annotated supervision.
+2. Rehearse Stage 1 examples in Stage 2 — sample a small fraction of
+   each corpus per epoch so the output head doesn't forget the gradient.
+3. Use a 3-class BIO head with the gradient signal applied as auxiliary
+   multi-task supervision instead of primary class labels. (Closer to the
+   structured-distillation framing the methodology has been pointing at.)
+
+The honest synthesis across iter 17 and iter 18: **iter 17 was the right
+"clean" supervision answer for the boundary problem; iter 18 trades some
+boundary precision for more general recall, with the gradient class
+signal mostly wasted on a fixable design issue**. The right system to
+ship today is iter 17. The right experiment to pursue if we want better
+domain-aware representations is iter 18-style training with one of the
+class-preservation fixes above. Both are reasonable next moves.
+
+### Iters 19–21 — data-selection mandates (the methodology applied one level deeper)
+
+The iter 17–18 arc produced a quiet observation: iter 1 (binary tagger,
+no POS, ~1402 training tokens) produced 67 raw spans on Ranni; iter 17
+(full pipeline, ~258,000 training tokens) produced 191 final spans
+across the *whole* corpus. The system kept *adding* training data and
+the result was a precision/recall pendulum, not monotonic improvement.
+Iter 4 had already shown implicitly that the *wrong* data hurts; iter 17
+showed that the *right* data dissolves the boundary problem; iter 18
+showed that *more* data with the wrong class structure regressed
+specific cases. The diagnostic the arc named: **the data layer itself
+has mandates and they haven't been being explicit**.
+
+The next three iterations apply the framework's discipline to the data
+layer.
+
+#### Iter 19 — entity-budget parity (minimum viable test)
+
+Clip each external corpus to ~80 entity spans (matching the hand-
+annotated corpus's ~79 spans), sample randomly within budget, train with
+the same iter-17 architecture. Stage 1 shrinks from 258k tokens to
+**3,332 tokens**.
+
+```
+iter 17 (full):   258,145 stage-1 tokens -> 191 corpus spans
+iter 19 (80/src):   3,332 stage-1 tokens -> 199 corpus spans
+```
+
+**78× less training, slightly *more* spans.** The result wasn't
+particularly clean — some boundary cases regressed and new common-noun
+false positives appeared (`figure`, `trust`, `beyond`) — but it
+established the headline finding the user named: *most of the iter-17
+training signal wasn't load-bearing for this task*. The interesting
+question shifted from "how much data?" to "which data?"
+
+#### Iter 20 — naive failure-driven curation (what doesn't work)
+
+Categorize iter 19's failures, define pattern matchers, *prefer*
+sentences matching any of them within the same 80-span budget. The
+patterns chosen were narrow:
+
+- `of-the-inside` — span containing literal `of the` with I-labels on both
+- `two-word-propn` — adjacent capitalized B-I pair
+- `initial-cap-as-O` — first token capitalized and O
+- `long-O-stretch` — 8+ contiguous O between entity spans
+
+Per-pattern matches across the three external corpora:
+
+| Pattern | KG | Lex | JSONL | Total |
+|---|---:|----:|------:|------:|
+| of-the-inside | 0 | 4 | 2 | **6** |
+| two-word-propn | 0 | 10 | 66 | **76** |
+| initial-cap-as-O | 19 | 4 | 6 | 29 |
+| long-O-stretch | 18 | 0 | 3 | 21 |
+
+**The two-word-propn pattern flooded the budget at 76/132 sentences,
+starving the longer-multi-word patterns.** The very pattern that was
+supposed to address "Remembrance of the Baleful Shadow" splitting (the
+`of-the-inside` pattern) found only 6 sentences across all three
+sources, because the canonical entity-name databases mostly hold short
+multi-word phrases without internal articles.
+
+Result: 187 corpus spans, *lower* than iter 19. New false positives
+(`relic`) and some regressions (`Cathedral of Manus Celes` now lost
+both halves). The pattern *did* kill some iter-19 false positives
+(`beyond`, `trust`) but the imbalance dominated.
+
+**Methodology lesson:** "any matching pattern is preferable to random"
+was the implicit mandate, and it under-corrected for the actual
+distribution of failures the curation was supposed to fix. The
+diagnostic names the iter 21 fix.
+
+#### Iter 21 — relaxed patterns across four corpora (the win)
+
+Two changes:
+
+1. **Relax the patterns.** Instead of requiring rigid `X of the Y`
+   structure, accept *any* span containing internal `of` / `the`, *any*
+   span with 2+ internal lowercase function words, *any* span of 3+
+   tokens, *any* span starting with a known failure prefix (House /
+   Cathedral / Manus / Two / Eternal / Forged / Greater / Remembrance).
+2. **Add `book-names.parquet` as a fourth corpus.** 1.48M book titles
+   are 92.5% multi-word with rich internal function-word structure —
+   exactly the supply the iter-20 patterns starved on.
+
+Per-pattern matches with the relaxed scheme across four sources:
+
+| Pattern | KG | Lex | JSONL | Books | Total |
+|---|---:|----:|------:|------:|------:|
+| anchored-failure | 0 | 0 | 0 | 1 | 1 |
+| multi-func-internal | 0 | 0 | 2 | **42** | 44 |
+| three-plus-word | 0 | 9 | 26 | **33** | 68 |
+| two-word-propn | 0 | 3 | 46 | 2 | 51 |
+| initial-cap-as-O | 17 | 0 | 1 | 2 | 20 |
+| long-O-stretch | 17 | 0 | 4 | 0 | 21 |
+
+Book-titles carried the multi-func-internal and three-plus-word load —
+75 sentences combined — exactly the patterns iter 20 starved on.
+
+**Result: 215 corpus spans, 47 on Ranni. Best result of the entire
+arc, with 60× less training data than iter 17.**
+
+```
+iter 17 (full):                258,145 stage-1 tokens -> 191 spans, 36 on Ranni
+iter 18 (full + gradient):     517,353 stage-1 tokens -> 212 spans, 43 on Ranni
+iter 19 (random clip):           3,332 stage-1 tokens -> 199 spans, 39 on Ranni
+iter 20 (narrow patterns):       3,668 stage-1 tokens -> 187 spans, 33 on Ranni
+iter 21 (relaxed + books):       4,355 stage-1 tokens -> 215 spans, 47 on Ranni
+```
+
+Failure-case progress on Ranni:
+
+| Case | iter 17 | iter 19 | iter 20 | iter 21 |
+|------|---------|---------|---------|---------|
+| Two Fingers | split | split | split | **one span ✓** |
+| Manus Celes | captured | captured | gone | captured |
+| Cathedral of Manus Celes | partial | partial | gone | partial (Cathedral of + Manus Celes) |
+| Remembrance of the Baleful Shadow | one span ✓ | Rem of | Rem of | Rem of the + Baleful Shadow |
+| House Caria | captured | House | House | House |
+| Divine Tower of Liurnia | captured | captured | captured | split |
+
+The model now reliably includes internal function words in spans (the
+training mandate was learned) but four-token entities sometimes split
+in new places. That's the next-iteration diagnostic — and the
+mandates it names are concrete: source examples of 4+ word entities,
+source examples with "common-noun-shape title prefix" (House, Lord,
+Lady), source sentences with sentence-medial capitalized verbs as O.
+
+### The methodology lesson the arc landed
+
+The entire iter 4–16 search for the right *architecture* to fix span
+boundaries was, in retrospect, a search for the supervision signal we
+didn't yet have. Iter 17 found the signal (domain-matched labels).
+Iters 19–21 then asked the question the framework should have been
+asking from the start: **which subset of that signal is actually
+load-bearing, and what mandates select it?**
+
+Five concrete claims fall out of this:
+
+1. **Data-selection mandates are the same kind of artifact as
+   architecture mandates.** Each is a named decision with an
+   ablate-able effect, a failure mode that diagnoses it, and a fix
+   that the diagnostic names.
+2. **Pattern matchers are mandates on training rows.** When the pattern
+   is too narrow, the diagnostic isn't "the pattern doesn't work";
+   it's "no corpus supplies enough rows that match the pattern,"
+   and the fix is either to relax the pattern or source a corpus that
+   does.
+3. **Per-pattern *balance* matters more than per-pattern *richness*.**
+   Iter 20 had two-word-propn at 76 sentences and `of-the-inside` at
+   6, and the imbalance dominated the result. Iter 21's relaxed
+   patterns plus the book-titles corpus brought the long-entity
+   patterns up to 44+68=112 sentences combined and the result followed.
+4. **The right corpus for a pattern is the one that has the pattern.**
+   The book-titles corpus had been available since iter 15 but was
+   only used as a generic span-coherence pretrain; iter 21 used it
+   *for the specific patterns it's rich in*. The same corpus, used
+   differently, produced a meaningfully different result.
+5. **Most of the training signal in the original data was waste — but
+   we couldn't have known which 4 thousand tokens were the load-bearing
+   ones without first running the full-data pipeline and reading what
+   failed.** The methodology of the bootstrap iterations (4–16) was
+   how we learned the failure modes; the methodology of the curation
+   iterations (19–21) was how we used that knowledge to pick the
+   minimal-viable training set.
+
+The synthesis across the whole P10 arc: **build the auditable layered
+system, run the full-data pipeline, read the failure modes, then use
+the named failure modes to select a curated minimal training set, and
+the result outperforms the full-data baseline.** That is the
+deliverable the framework's positioning has been promising — not a
+better model on a benchmark, but a development process where each
+iteration's diagnostic is the next iteration's mandate, applied
+indifferently at the architecture layer or the data layer.
+
 ## Honest observations and limitations
 
 - **This isn't state-of-the-art NLP.** The training set is 14 hand-
