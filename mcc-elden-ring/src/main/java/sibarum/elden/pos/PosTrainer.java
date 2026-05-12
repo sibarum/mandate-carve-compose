@@ -55,6 +55,10 @@ public final class PosTrainer {
         public final int perTokenDim;   // embedDim, or embedDim + SHAPE_DIM if shape features on
         public final int contextDim;
         public final boolean useShapeFeatures;
+        /** Bigram transitions for Viterbi decode; null if greedy-only. */
+        public PosTransitions transitions;
+        /** Weight applied to transition log-probs during Viterbi decode. */
+        public double viterbiWeight;
 
         TrainedPosLayer(SymbolEmbeddingTable table, ClassifierHead classifier,
                         int embedDim, int windowRadius, boolean useShapeFeatures) {
@@ -72,15 +76,42 @@ public final class PosTrainer {
             return buildContext(sentence, position, table, windowRadius, embedDim, perTokenDim, contextDim, useShapeFeatures);
         }
 
-        /** Predict POS tag for one token at the given position. */
-        public String predict(List<String> sentence, int position) {
+        /** Compute emission logits for one position. */
+        public double[] emissionsAt(List<String> sentence, int position) {
             double[] ctx = contextOf(sentence, position);
-            double[] logits = ((MatrixValue) classifier.apply(List.of(new MatrixValue(ctx)))).data();
+            return ((MatrixValue) classifier.apply(List.of(new MatrixValue(ctx)))).data();
+        }
+
+        /** Greedy argmax POS tag for one position (no transitions). */
+        public String predict(List<String> sentence, int position) {
+            double[] logits = emissionsAt(sentence, position);
             int best = 0;
             for (int i = 1; i < logits.length; i++) {
                 if (logits[i] > logits[best]) best = i;
             }
             return PosTagset.tagAt(best);
+        }
+
+        /**
+         * Sequence prediction. Uses Viterbi if {@link #transitions} is set;
+         * falls back to per-position greedy argmax otherwise. Returns one
+         * tag-index per token.
+         */
+        public int[] predictSequence(List<String> sentence) {
+            int T = sentence.size();
+            int K = PosTagset.size();
+            double[][] emissions = new double[T][K];
+            for (int i = 0; i < T; i++) emissions[i] = emissionsAt(sentence, i);
+            if (transitions != null) {
+                return ViterbiDecoder.decode(emissions, transitions, viterbiWeight);
+            }
+            int[] out = new int[T];
+            for (int i = 0; i < T; i++) {
+                int best = 0;
+                for (int k = 1; k < K; k++) if (emissions[i][k] > emissions[i][best]) best = k;
+                out[i] = best;
+            }
+            return out;
         }
     }
 
@@ -220,12 +251,60 @@ public final class PosTrainer {
                     epoch + 1, avgLoss, trainAcc, dev.accuracy);
         }
 
-        // Final report: per-tag P/R and top confusions on the dev set.
+        // Final report: per-tag P/R and top confusions on the dev set (greedy).
         System.out.println();
         EvalResult finalEval = evaluate(layer, devSents);
         printConfusionReport(finalEval);
 
+        // Bigram transitions from the train split + Viterbi weight sweep on dev.
+        layer.transitions = PosTransitions.fromSentences(trainSents);
+        double[] sweep = {0.0, 0.05, 0.10, 0.20, 0.30, 0.50, 1.0};
+        System.out.println();
+        System.out.println("Viterbi transition-weight sweep (dev set):");
+        double bestWeight = 0.0;
+        double bestAcc = finalEval.accuracy;
+        for (double w : sweep) {
+            layer.viterbiWeight = w;
+            EvalResult r = evaluateSequence(layer, devSents);
+            String marker = r.accuracy > bestAcc ? "  <- best" : "";
+            System.out.printf("    transWeight=%.2f   dev_acc=%.4f%s%n", w, r.accuracy, marker);
+            if (r.accuracy > bestAcc) { bestAcc = r.accuracy; bestWeight = w; }
+        }
+        layer.viterbiWeight = bestWeight;
+        System.out.printf("Selected transWeight=%.2f (dev_acc=%.4f, vs greedy %.4f).%n",
+                bestWeight, bestAcc, finalEval.accuracy);
+        if (bestWeight > 0.0) {
+            EvalResult finalViterbi = evaluateSequence(layer, devSents);
+            System.out.println();
+            printConfusionReport(finalViterbi);
+        }
+
         return layer;
+    }
+
+    /**
+     * Evaluate the layer in sequence (Viterbi) mode using the layer's current
+     * {@code transitions} and {@code viterbiWeight}. Falls back to per-position
+     * greedy if transitions are null.
+     */
+    public static EvalResult evaluateSequence(TrainedPosLayer layer, List<Sentence> sentences) {
+        int n = PosTagset.size();
+        int[][] cm = new int[n][n];
+        int correct = 0, total = 0;
+        for (Sentence s : sentences) {
+            List<String> forms = formsOf(s);
+            int[] pred = layer.predictSequence(forms);
+            for (int i = 0; i < forms.size(); i++) {
+                int gold = PosTagset.indexOf(s.tokens().get(i).upos());
+                if (gold < 0) continue;
+                int p = pred[i];
+                cm[gold][p]++;
+                if (p == gold) correct++;
+                total++;
+            }
+        }
+        double acc = total == 0 ? 0.0 : (double) correct / total;
+        return new EvalResult(acc, cm, total);
     }
 
     /** Evaluate a trained layer on a list of sentences. */

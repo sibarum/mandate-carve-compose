@@ -258,9 +258,234 @@ play noun or verb or adjective by context). Shape features and wider
 windows can't fix them; they need either a stronger representation (a
 contextual embedding, not a lookup table) or a structured-decode
 mandate over the tag sequence itself ("if the previous tag is DET, the
-current tag is much more likely NOUN/ADJ than VERB"). That second
-option — BIO-transitions-over-POS as a Viterbi-style decode — is the
-next layer-improvement target named by the current diagnostic.
+current tag is much more likely NOUN/ADJ than VERB").
+
+### Iter 14 — Viterbi decode (null result)
+
+The structured-decode mandate got tried. Bigram tag-transition
+log-probabilities computed from the UD training split (Laplace-
+smoothed), plugged into a standard Viterbi forward+backtrace, with the
+emission scores supplied by the existing MLP. A single tuning knob —
+`transWeight`, scalar multiplier on the transition contribution — was
+swept on the dev set:
+
+```
+Viterbi transition-weight sweep (dev set):
+    transWeight=0.00   dev_acc=0.9094   <- greedy baseline
+    transWeight=0.05   dev_acc=0.9094
+    transWeight=0.10   dev_acc=0.9083
+    transWeight=0.20   dev_acc=0.8937
+    transWeight=0.30   dev_acc=0.8641
+    transWeight=0.50   dev_acc=0.7704
+    transWeight=1.00   dev_acc=0.4556
+```
+
+**No weight beat greedy.** Every non-zero contribution either matched
+or regressed; weight=1.0 collapsed to 45.6% because the transition
+prior began ignoring the input entirely. The selected weight is 0.0
+(i.e., the layer falls back to greedy decode).
+
+Why the null result? The window-radius-2 + shape-features MLP already
+captures the bigram-level context a Viterbi prior would add. The
+remaining confusions — `DET ADJ NOUN` vs `DET NOUN NOUN`, `AUX VERB`
+vs `AUX NOUN` — are sequences a flat bigram model can't disambiguate
+because *both* paths are common in English. The errors are
+representational, not structural.
+
+This is a real methodology outcome, recorded honestly: the named
+mandate was tested and didn't deliver, and the negative result
+*itself* names the next mandate — **a richer per-token representation
+(contextual embedding) rather than a structured-decode layer over the
+existing one**. The transition + Viterbi infrastructure stays in the
+codebase (`PosTransitions`, `ViterbiDecoder`,
+`TrainedPosLayer.predictSequence`), gated on a non-zero weight, so a
+future iteration that finds a useful application — e.g. constrained
+decode over BIO labels — can reuse it without re-implementing.
+
+### Iter 15 — span-coherence pretraining from book titles
+
+The downstream-task focus shifts back to the BIO entity tagger. By
+iter 13 the remaining failure on Ranni was not false positives — those
+were essentially solved by the POS-conditioned decode — but **span
+boundary errors**. The canonical example: "Remembrance of the Baleful
+Shadow" came out as two spans, splitting at the article `the`:
+
+```
+iter 13:  [Remembrance of] | [Baleful Shadow]
+```
+
+The diagnostic this names: the BIO tagger defaults to O on lowercase
+function-word tokens, even when both flanking tokens are I-ENT inside a
+multi-word entity. The model has too few training examples of "X of the
+Y" / "X to the Y" patterns to learn that internal function words stay
+inside a span.
+
+The mandate: a pretraining corpus with **thousands of multi-word
+capitalized phrases containing internal function words**. Such a corpus
+exists in `book-names.parquet` — 1.48M book titles with the right
+structural morphology ("A Guide to the Project Management Body of
+Knowledge", "The Handbook of Project-Based Management", "Principles of
+Corporate Finance"). 20k random titles get wrapped in simple sentence
+templates ("She wrote [TITLE].", "The book [TITLE] was popular.") and
+fed as Stage 0 BIO pretraining ahead of the iter-13 stages.
+
+| Stage | Source                       | Effect on Ranni inference (intermediate) |
+|-------|------------------------------|------------------------------------------|
+| 0     | 20k book titles (264k tokens) | over-spans: B=9, I=588, 68 spans         |
+| 1     | Lexicanum cross-entry         | reverts to 52 spans                      |
+| 2     | Elden Ring fine-tune (60 ep)  | 45 spans final                           |
+
+Stage 0 alone is too aggressive — book titles are 68% in-span by
+construction, so the model overfits to "everything is I." Stage 1
+reverses most of that; Stage 2 settles it.
+
+**The targeted failure mode partially moved:**
+
+```
+iter 13:  [Remembrance of]      | [Baleful Shadow]   (split after "of")
+iter 15:  [Remembrance of the]  | [Baleful Shadow]   (split after "the")
+```
+
+The article `the` is now pulled into the span — a real one-token
+improvement — but the entity still breaks at the next capitalized
+token. The residual error is now specifically an **I → B transition**
+problem: the BIO tagger emits B at "Baleful" even though the previous
+token is I and the surrounding context is in-span. Pretraining moved
+the *emission* one token in the right direction; the transition prior
+the model is using ("start a new span at every capitalized token")
+remains uncorrected.
+
+**Methodology read:** Stage 0 pretraining was a real partial fix, not a
+null result, but its ceiling was the per-position emission model. The
+next mandate the residual error *explicitly* names is the I → B
+transition discouragement — which is exactly the structural-decode use
+case the iter-14 Viterbi null result said the machinery would be useful
+for. The two iterations stack: iter 15 made the upstream tagger willing
+to extend spans across one function word; iter 16 will make the
+decoder unwilling to start a new span when the surrounding context is
+in-span.
+
+### Iter 16 — Viterbi over BIO with hand-set transitions
+
+Took the iter-15 stack and replaced the per-position greedy argmax at
+inference with Viterbi over hand-set BIO transitions:
+
+```
+trans[O][O] =  0      trans[B][O] =  0      trans[I][O] =  0
+trans[O][B] =  0      trans[B][B] = -1      trans[I][B] = -2   <- the targeted penalty
+trans[O][I] = -50     trans[B][I] =  0      trans[I][I] =  0   <- structurally forbidden
+```
+
+`transWeight = 1.0` so the hand-set magnitudes take effect as written.
+`-50` is a finite stand-in for `-infinity` (avoids NaN if the weight is
+ever zero). The O→I forbidden value is the same as the standard BIO
+structural constraint that has been implicit in the codebase all along.
+
+**Result: a near-null effect.** Only 2 token labels changed across 696
+Ranni tokens. Final span count went from 45 (iter 15) to 42. The
+targeted failure mode actually regressed:
+
+```
+iter 13:  [Remembrance of]      | [Baleful Shadow]   (split after "of")
+iter 15:  [Remembrance of the]  | [Baleful Shadow]   (article pulled in)
+iter 16:  [Remembrance of]      | [Baleful Shadow]   (article pushed back out)
+```
+
+**The diagnostic:** the BIO tagger's path through this phrase is not
+`I → B` directly; it's `I → O → B`. The model emits a strong O at the
+article and a strong B at the next capitalized token. Both legs of that
+path cost 0 in my transition matrix — the I→B penalty is sidestepped by
+the free I→O→B escape. First-order Markov transitions can't express
+"stay in span across this gap" when the gap genuinely is an O emission;
+the constraint needs context the Markov state doesn't carry.
+
+**What the iter-16 residual error names as the next mandate:**
+
+- **Post-Viterbi span-merge.** A heuristic pass that merges adjacent
+  spans separated by ≤2 function-word O tokens flanked by capitalized
+  I-ENT content. This isn't a Markov constraint — it's a domain rule
+  about how entity spans behave in our corpus.
+- **A richer label set.** Distinguish "in-span-gap" from "outside-O" so
+  the Markov chain can carry the "inside entity" state across function
+  words: `O, B, I, GAP` with transitions `I → GAP` cheap, `GAP → B`
+  expensive, `GAP → I` cheap. This *does* lift the constraint into the
+  Markov state.
+
+The infrastructure (`BioTransitions`, the `ViterbiDecoder` overload
+that takes raw `logTrans` / `logInitial` arrays) is in place and
+correct — it just isn't expressive enough by itself to fix the
+specific failure mode iter 15 named. A second null result, recorded
+honestly, with the diagnostic naming a more capable next attempt.
+
+### Iter 17 — domain-matched supervision (the bootstrap chain dissolves)
+
+A new dataset arrived: `elden_ring_final_train.jsonl` — 11,693 Elden
+Ring Q&A pairs, each with a `metadata.entity_name` field naming a
+canonical entity that appears in the `output` prose. 2,438 unique
+entity names, 92.5% multi-token, in our exact domain. Examples:
+
+```
+"Ash of War: Repeating Thrust" / "Carian Glintstone Staff" /
+"Death Rite Bird" / "Prophet Robe (Altered)" / "Cathedral of Manus Celes"
+```
+
+This is exactly the structural pattern iter 5–16 had been chasing
+through bootstrap surrogates (Parquet news NER, Lexicanum cross-entry,
+book titles, structured decode). With domain-matched labeled data
+available, the bootstrap chain becomes unnecessary.
+
+The new pipeline is *simpler*, not more complex: two stages.
+
+| Stage | Source | Effect |
+|-------|--------|--------|
+| 1 | 11.7k JSONL rows, entity_name labeled B/I in output prose (258k tokens) | 14 spans on Ranni after stage 1 — high precision, low recall |
+| 2 | Elden Ring hand-annotations (60 ep) | 36 final spans on Ranni, multi-word entities correctly bounded |
+
+**The targeted failure mode is solved:**
+
+```
+iter 13:  [Remembrance of] | [Baleful Shadow]
+iter 15:  [Remembrance of the] | [Baleful Shadow]
+iter 16:  [Remembrance of] | [Baleful Shadow]
+iter 17:  [Remembrance of the Baleful Shadow]    <- one span, correctly bounded
+```
+
+`House Caria` also recovered (iter 13 had only `House`). Most multi-
+word entities now bound correctly: Carian Inverted Statue, Divine
+Tower of Liurnia, Fingerslayer Blade, Cursemark of Death, Night of
+the Black Knives, Cathedral of Manus Celes (mostly), Black
+Knifeprint, Discarded Palace Key.
+
+**Trade-off (honest):** the run produces 36 final spans vs iter 13's
+43 — fewer, but with different mistakes:
+- Wins: 7 multi-word entities correctly bounded that iter 13 split
+- Losses: a few entities iter 13 captured are now fragmented or
+  missed (`Two Fingers` → `Two` + `Fingers`, `Eternal Cities` →
+  `Eternal`, `Cathedral of Manus Celes` → `Manus Celes`)
+
+The recall loss is interpretable: the JSONL trains the model to
+recognize specific surface forms in specific contexts (Q&A answers).
+Entities heavily present in the JSONL (e.g., things weapons can do to
+you) get clean recognition; entities prominent in Ranni lore but
+under-represented in the JSONL (boss names appearing across multiple
+questlines) lose recall. The right next step is to merge the JSONL
+supervision with the iter-13 Lexicanum cross-entry supervision rather
+than fully replace it — but the *boundary* problem the entire iter
+14–16 arc was chasing is decisively resolved.
+
+**The methodology lesson, recorded:** iters 4 through 16 were a
+sequence of increasingly elaborate substitutes for one missing
+ingredient — domain-matched labeled supervision. Each substitute
+made measurable but limited progress on the targeted failure mode;
+none fully resolved it. When the actual labeled data arrived, the
+problem dissolved in *one* stage with no architectural changes. This
+is not a criticism of the bootstrap iterations — each was honestly
+diagnostic, and the framework's discipline (one named mandate per
+iter, measure, name the residual) held up perfectly. But it points
+at a sharper rule: **when a series of structural fixes makes only
+incremental progress, the diagnostic is often "we don't have the
+right supervision."** The right next move is to look for the data,
+not the architecture.
 
 ## Honest observations and limitations
 

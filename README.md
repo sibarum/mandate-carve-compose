@@ -191,6 +191,32 @@ runnable; each closes with a written-up diagnostic.
   previously demoted 22. **Improving the lower layer raised the
   ceiling for the upper layer automatically**, which is the layered-
   inspectability methodology paying off at the layer-stack level.
+- **v3 P10 follow-up — span-boundary chase (iters 14–17).** Four
+  iterations targeting the residual failure mode: multi-word entities
+  with internal function words ("Remembrance of the Baleful Shadow")
+  splitting at the article. **Iter 14** (Viterbi with learned bigram
+  POS transitions): null result — every non-zero transition weight
+  regressed; bigram transitions can't disambiguate semantic confusions
+  like DET ADJ NOUN vs DET NOUN NOUN. **Iter 15** (book-title
+  span-coherence pretraining from 1.48M Parquet rows): partial fix —
+  `the` got pulled in but full entity still split at the next
+  capitalized token. **Iter 16** (Viterbi over BIO with hand-set
+  transitions): another near-null — the model takes the I→O→B escape
+  path that first-order Markov can't see. **Iter 17** (replace the
+  whole bootstrap chain with `elden_ring_final_train.jsonl` —
+  11.7k Elden Ring Q&A pairs with canonical `entity_name` metadata):
+  **the failure mode dissolves**. "Remembrance of the Baleful Shadow",
+  "House Caria", and most multi-word lore entities now bound
+  correctly as single spans, in one Stage-1 pretrain over
+  domain-matched labels. The methodology lesson: iters 4 through 16
+  were an honest series of *substitutes* for one missing ingredient
+  (domain-matched labeled supervision); when the data arrived, no
+  architectural change was needed. **The sharper rule: when a series
+  of structural fixes makes only incremental progress, the
+  diagnostic is often "we don't have the right supervision" — look
+  for the data, not the architecture.** Infrastructure landed:
+  `PosTransitions`, `BioTransitions`, generic `ViterbiDecoder`,
+  `BookTitlesBioLoader`, `EldenJsonlBioLoader`, `ParquetPeekDemo`.
 
 All implementation is in Java 25. MLPs and transformer blocks are
 written from scratch (~500 lines including backprop) with no
@@ -527,7 +553,11 @@ Available demos, ordered by dependency:
 | `BioInferenceDemo`            | v3 P10   | BIO (3-class) structural mandate: multi-word entities cluster cleanly |
 | `BioWithProperNounsDemo`      | v3 P10   | Staged training: Parquet (news NER) → fine-tune on Elden Ring |
 | `BioWithLoreDemo`             | v3 P10   | Staged training with Parquet + Lexicanum (self-mention labeling) |
-| `BioCrossEntryDemo`           | v3 P10   | **Best run**: Lexicanum cross-entry labeling + density filter + POS-conditioned decode |
+| `BioCrossEntryDemo`           | v3 P10   | **Iter 8 best**: Lexicanum cross-entry labeling + density filter + POS-conditioned decode (improved POS layer = iter 13) |
+| `ParquetPeekDemo`             | v3 P10   | Schema + sample-row inspector for any Parquet file (DuckDB) |
+| `BioWithBookTitlesDemo`       | v3 P10   | Iter 15: 3-stage BIO with book-title span-coherence pretraining |
+| `BioWithViterbiDemo`          | v3 P10   | Iter 16: book-title pretrain + Viterbi over BIO with hand-set transitions |
+| `BioWithEldenJsonlDemo`       | v3 P10   | **Iter 17 — boundary problem resolved**: direct supervision from `elden_ring_final_train.jsonl` (11.7k labeled Q&A pairs) |
 
 ## Repository layout
 
