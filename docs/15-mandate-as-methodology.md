@@ -733,6 +733,120 @@ better model on a benchmark, but a development process where each
 iteration's diagnostic is the next iteration's mandate, applied
 indifferently at the architecture layer or the data layer.
 
+### Iter 22 — per-type heads (the next layer in the stack works)
+
+The first lateral move after the iter 17–21 entity-tagger arc: add a
+**type classifier** as a third trainable layer on top of POS + BIO. For
+each detected entity span, predict one of seven `EntityType` values
+(`CHARACTER`, `ARTIFACT`, `EVENT`, `PLACE`, `FACTION`, `ERA`, `CONCEPT`).
+Implementation is small: ~250 lines for a span-feature extractor (average
+of per-token context + POS logits across span tokens), a `ClassifierHead`
+wrapper, and a JSONL typed-span loader (mapping the JSONL's ten
+in-game-mechanical types to our seven narrative types via a static
+table).
+
+Training:
+- Stage 1: ~11k typed spans from the JSONL covers four of seven types
+  (ARTIFACT, CHARACTER, PLACE, CONCEPT) via the mapping.
+- Stage 2: 108 typed hand-annotated spans add EVENT to the mix
+  (FACTION and ERA stay at zero training samples — our hand annotations
+  never used those values).
+
+Hand-annotated training-set accuracy: 99.1%. Held-out Ranni distribution
+of predicted types: CHARACTER 58, ARTIFACT 47, EVENT 10, PLACE 23,
+CONCEPT 53, FACTION 0, ERA 0. By eye, the well-trained classes are
+mostly correct (`Rennala` → CHARACTER, `Lands Between` → PLACE,
+`Night of the Black Knives` → EVENT, `Cursemark of Death` → ARTIFACT);
+the PLACE class is under-resourced and mis-types some locations as
+ARTIFACT or CONCEPT.
+
+**The architectural claim landed:** three named layers, each
+independently trained, each with its own input/output contract, stack
+into a working typed-NER pipeline. Adding a layer cost ~250 lines and
+reused the existing POS + BIO layers without modification. That is the
+"compose named layers" pitch made concrete on a different layer than
+the iter 1–21 arc had exercised.
+
+### Iter 23 — substrate-authentic type labels (collapse observed)
+
+Iter 22 had one inconsistency: the seven `EntityType` labels were
+encoded as one-hot output positions. From the AI's perspective, those
+are alien opaque integers — they exist outside the symbol-vector
+substrate the framework otherwise uses uniformly. The framework's
+*own* `SymbolEmbeddingTable` was built exactly for the case "named
+symbols → learnable vectors"; type names should live in that substrate
+too, with their own mini-KV.
+
+The corrected design (iter 23):
+- Register the seven `EntityType.name()` strings as keys in a 32-dim
+  `SymbolEmbeddingTable` of their own (a "type-context mini-KV").
+- The type head's MLP outputs a 32-dim vector instead of 7-dim logits.
+- Loss is MSE between predicted vector and the gold type's anchor.
+- Both MLP weights AND the anchor vectors update via gradient descent
+  (anchors via `SymbolEmbeddingTable.update`). The two co-adapt: anchors
+  become learned class centroids; the MLP maps span features to those
+  centroids.
+- Inference: nearest-anchor cosine similarity over the seven vectors.
+
+**Result: anchor collapse.**
+
+After Stage 1 + Stage 2 training, every type that received supervision
+had its anchor pulled to the *same point* in 32-dim space:
+
+```
+CHARACTER, ARTIFACT, EVENT, PLACE, CONCEPT : magnitude 0.276,
+                                              mutual cosine 1.000
+FACTION, ERA                                : magnitudes 0.902 / 1.024
+                                              (random init, no training)
+```
+
+MLP training loss went to 0.0000 — the symptom of a degenerate fixed
+point. The MLP learned to output a single point `c`, and all trainable
+anchors followed it to `c`. Loss vanishes, but `argmax(cosine)` over
+identical anchors becomes meaningless. Training-set accuracy dropped
+from iter 22's 99.1% to 29.6%.
+
+**Why it happened:** with both predictor and targets trainable and no
+*restoring force* separating different classes, the loss landscape has a
+trivial fixed point at "everything collapses to one vector." Sufficient
+per-class data doesn't prevent this — the data only distinguishes
+classes *if the anchors stay distinguished*; the moment they drift
+together, the per-class data becomes effectively the same supervision
+signal.
+
+**The next mandate the diagnostic names** — any of these would address
+collapse, each from the standard metric-learning playbook:
+
+1. **Contrastive loss component.** Penalize cosine similarity between
+   anchors of different types during training. The missing
+   restoring-force gradient.
+2. **Orthogonal anchor initialization.** Start the seven anchors as
+   orthogonal unit vectors; collapse then requires fighting the
+   initial geometric separation.
+3. **Frozen anchors after warmup.** Train both for N epochs, then
+   freeze the anchors and continue MLP-only training.
+4. **Asymmetric learning rates.** Anchor LR set to 1% of MLP LR — anchors
+   are *nominally* trainable but effectively-frozen on the relevant
+   timescale.
+
+**Why iter 23 is in the repo as a recorded negative result:** the
+substrate-authentic architecture (type labels as real KV entries) is
+correct *as a principle* — it's how the framework is supposed to
+treat all symbolic things. The collapse demonstrates that
+substrate-correctness alone is insufficient; the missing piece is the
+anti-collapse mandate, which the diagnostic above names cleanly. A
+next iteration could add any of the four fixes and would (predictably)
+recover iter-22-like accuracy while keeping the architectural
+authenticity. For the purpose of *demonstrating the methodology*,
+iter 23 is more valuable than a quietly-passing run: it shows the
+"name the missing mandate" loop working even on the framework's own
+philosophical commitments.
+
+The pragmatic upshot: iter 22 (one-hot) is the shippable working
+typed-NER pipeline. Iter 23 (vector-anchor) is the philosophically
+consistent architecture with one named missing component. The
+methodology vocabulary applies symmetrically to both.
+
 ## Honest observations and limitations
 
 - **This isn't state-of-the-art NLP.** The training set is 14 hand-

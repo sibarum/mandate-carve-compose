@@ -217,6 +217,28 @@ runnable; each closes with a written-up diagnostic.
   for the data, not the architecture.** Infrastructure landed:
   `PosTransitions`, `BioTransitions`, generic `ViterbiDecoder`,
   `BookTitlesBioLoader`, `EldenJsonlBioLoader`, `ParquetPeekDemo`.
+- **v3 P10 follow-up — typed-entity heads (iters 22–23).** After the
+  iter 17–21 entity-tagger arc, the natural next move was lateral: add
+  a third trainable layer that predicts `EntityType` for each detected
+  span. **Iter 22** (one-hot output): three named layers (POS → BIO →
+  Type), 99.1% training-set accuracy on hand-annotated, typed Ranni
+  output reads naturally (`[CHARACTER] Rennala`, `[ARTIFACT] Rune of
+  Death`, `[EVENT] Night of the Black Knives`). **The compositional
+  claim worked — adding a layer cost ~250 lines and reused the prior
+  layers unmodified.** **Iter 23** (substrate-authentic vector-anchor
+  output): the seven `EntityType` labels registered as keys in their
+  own `SymbolEmbeddingTable`, MLP outputs a 32-dim vector, inference
+  is nearest-anchor cosine, both MLP and anchors trainable. **Result:
+  anchor collapse** — all trained anchors drifted to the same point;
+  training-set accuracy crashed from 99.1% to 29.6%. The diagnostic
+  cleanly names the missing piece (a contrastive component to push
+  different-class anchors apart). Iter 23 stays in the repo as the
+  honest negative result: the substrate-authentic architecture is
+  *correct as a principle* but needs an anti-collapse mandate to
+  function. Both iters demonstrate the methodology generalizing across
+  layers: each named mandate has an ablate-able effect, each failure
+  names the next missing mandate, applied symmetrically at architecture
+  *and* data-selection *and* now output-encoding layers.
 - **v3 P10 follow-up — data-selection mandates (iters 18–21).**
   Iter 17 found the right supervision, but at 258k Stage-1 tokens.
   This sub-arc asks: *which subset of that signal is load-bearing,
@@ -270,7 +292,7 @@ In dependency order — each builds on the previous:
 | [`12-network-cache.md`](docs/12-network-cache.md) | NetworkCache: stateful cache of trained subgraphs; spawn-on-demand; eviction by success |
 | [`13-carver-composes-from-cache.md`](docs/13-carver-composes-from-cache.md) | Carver composes from the cache's inventory; N-step composition via BFS reachability |
 | [`14-grand-finale.md`](docs/14-grand-finale.md) | The grand finale: a substrate that builds itself from a stream of mandates |
-| [`15-mandate-as-methodology.md`](docs/15-mandate-as-methodology.md) | Twenty-one iterations on real-world NLP; MCC as a development methodology applied at both the architecture and data-selection layers |
+| [`15-mandate-as-methodology.md`](docs/15-mandate-as-methodology.md) | Twenty-three iterations on real-world NLP; MCC as a development methodology applied at the architecture, data-selection, and output-encoding layers |
 
 ## What has been demonstrated
 
@@ -589,6 +611,8 @@ Available demos, ordered by dependency:
 | `BioBudgetParitySnapshotDemo` | v3 P10   | Iter 19: 80-span-per-source budget; **78× less training, comparable result** to iter 17 |
 | `BioTargetedCurationSnapshotDemo` | v3 P10 | Iter 20: failure-driven biased clip with narrow patterns; backfires — the `two-word-propn` pattern floods the budget |
 | `BioRelaxedCurationSnapshotDemo` | v3 P10 | **Iter 21 — arc best**: relaxed patterns + book-titles as 4th corpus; 60× less training, +12.6% spans vs iter 17 |
+| `BioWithTypedHeadsSnapshotDemo` | v3 P10 | **Iter 22**: typed-entity classifier (one-hot output) — three named layers stack cleanly |
+| `BioWithVectorTypedHeadsSnapshotDemo` | v3 P10 | Iter 23: substrate-authentic vector-anchor type head; recorded *negative* result (anchor collapse names the missing contrastive mandate) |
 
 ## Repository layout
 
