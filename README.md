@@ -265,6 +265,63 @@ runnable; each closes with a written-up diagnostic.
   `BioTargetedCurationSnapshotDemo`, `BioRelaxedCurationSnapshotDemo`,
   `FullCorpusSnapshotDemo`, and side-by-side `snapshot-iter*.txt`
   artifacts for review.
+- **v3 P11** — **KSQ: a fixed-algebra substrate.** Parallel research
+  line opening alongside the MCC NLP arc. KSQ
+  (Key-Split-Quaternion) is an architecture where the *substrate* is
+  the split-quaternion algebra $\mathbb{H}_s \cong M_2(\mathbb{R})$
+  with four hand-picked anchors (Möbius cardinals: $K_0$ identity,
+  $K_i$ elliptic, $K_j$ hyperbolic, $K_\infty$ idempotent) as fixed
+  structural constants, and learning is constrained to **two small
+  embedding tables** — token → anchor coefficients and β → output
+  logits. No learned weight matrices anywhere in the middle. The
+  "computation" lives in the algebra (one bilinear step $Q^2 = Q
+  \cdot Q$); the model's expressive job is to pick where in the
+  algebra each input lands. Three architectural iterations, each
+  named by a structural diagnostic: **iter 1** (chain $S_T = Q_T
+  \cdots Q_1$): transformer-shaped, REJECTED — the algebra was being
+  used as sequence-composition. **iter 2** (sum-pool token logits →
+  softmax α → single Q → Q²): T=2 XOR converges, but the spec's
+  predicted K_i specialization is unreachable (0/40 trials); the
+  optimizer locks onto K_j because softmax α makes the cross-term
+  $\beta_i = 2 \alpha_0 \alpha_i$ sign-bounded. **iter 3**
+  (signed α via tanh + squared-product regularizer): K_i becomes
+  accessible (0 → 19 occurrences), the K_i/K_j basin counts split
+  exactly 5-5 at λ=0.1, and the architecture's elliptic/hyperbolic
+  symmetry is restored. A new degenerate corner surfaces — saturated
+  $K_i \leftrightarrow K_j$ paired specialization makes Q² = 0 via
+  the anti-commutator $\{K_i, K_j\} = 0$ — names the next mandate
+  (contrastive cross-vocab regularizer; deferred). Every iteration
+  gradient-checked to machine epsilon before any training, so
+  "architecture is wrong" stayed cleanly separated from "math is
+  wrong." **iter 4** (re-align $K_\infty$ from $(1+k)/2$ to
+  $(1+j)/2 = e_+$, the idempotent of the *same* $\mathbb{R}[j]$
+  subalgebra that $K_j$ generates): the anchor set becomes
+  intentionally linearly dependent ($K_0 + K_j = 2 K_\infty$,
+  spanning 3 dims in $M_2(\mathbb{R})$ rather than 4), so $K_j$
+  and $K_\infty$ basins now represent two natural *bases* of the
+  same subalgebra. XOR solve rate preserved at 10/10 across λ ≤ 0.1;
+  seed 3 lands cleanly in $K_j \to K_\infty$ (one token in
+  generator basis, one in idempotent basis), the cleanest possible
+  algebraic outcome for the inference-specialization collapse.
+  **iter 5** (cross-vocab contrastive regularizer promoted from
+  deferred to implemented after the same same-anchor collapse
+  failure was named in two consecutive iterations):
+  $\mathcal{R}_{\text{cross}} = \nu \sum_{v_1 \neq v_2}
+  \langle\alpha(v_1), \alpha(v_2)\rangle^2$, gradient-checked at
+  6.8e-11. λ=1.0 solve rate goes 6/10 → 9/10 with ν ≥ 0.1.
+  Small regression at λ=0.1 (10/10 → 9/10) because the squared
+  inner product penalizes anti-aligned same-anchor solutions
+  (valid for XOR; the regularizer prefers truly orthogonal
+  anchors). No single (λ, ν) achieves clean 10/10 across all
+  three λ; names the iter-6 mandate (adaptive ν schedule: strong
+  early, decay late). Adds `sibarum.strnn.ksq.*` (anchors, Mat2,
+  embedding table, output head, model) and two demos.
+  The methodology lesson
+  (substrate-construction mandates are mandates too, with the same
+  ablate-able-effect discipline as the architecture and data
+  mandates from iter 1–23) extends MCC down a level: the algebra
+  itself is a designed primitive whose choice has measurable
+  consequences.
 
 All implementation is in Java 25. MLPs and transformer blocks are
 written from scratch (~500 lines including backprop) with no
@@ -293,6 +350,7 @@ In dependency order — each builds on the previous:
 | [`13-carver-composes-from-cache.md`](docs/13-carver-composes-from-cache.md) | Carver composes from the cache's inventory; N-step composition via BFS reachability |
 | [`14-grand-finale.md`](docs/14-grand-finale.md) | The grand finale: a substrate that builds itself from a stream of mandates |
 | [`15-mandate-as-methodology.md`](docs/15-mandate-as-methodology.md) | Twenty-three iterations on real-world NLP; MCC as a development methodology applied at the architecture, data-selection, and output-encoding layers |
+| [`16-ksq-substrate.md`](docs/16-ksq-substrate.md) | KSQ: a fixed split-quaternion algebra as substrate; three architectural iterations restoring elliptic/hyperbolic basin symmetry; mandates at the substrate-construction layer |
 
 ## What has been demonstrated
 
@@ -437,6 +495,47 @@ In dependency order — each builds on the previous:
   named, individually-validated layers, where every failure is
   localizable. This is to AI roughly what TDD is to software
   engineering — designing for inspectability changes what you build.
+
+- **A fixed-algebra substrate is a viable MCC primitive** ([16](docs/16-ksq-substrate.md)).
+  KSQ uses the split-quaternion algebra
+  $\mathbb{H}_s \cong M_2(\mathbb{R})$ as a fixed substrate with four
+  Möbius-cardinal anchors, and constrains learning to two small
+  embedding tables. No learned weight matrices anywhere in the middle;
+  the model's expressive job is choosing where in the algebra each
+  input lands. Five structural rewrites driven by named diagnostics:
+  chain (transformer-shaped) → sum-pool + softmax α + $Q^2$ (K_i
+  basin unreachable, 0/40) → sum-pool + tanh signed α + $Q^2$ (K_i
+  becomes accessible, K_i/K_j basins split exactly 5-5 at λ=0.1) →
+  re-align $K_\infty$ to the same $\mathbb{R}[j]$ subalgebra as
+  $K_j$ (anchor set becomes intentionally linearly dependent;
+  $K_j \leftrightarrow K_\infty$ basins now express two bases of the
+  same subalgebra rather than two different subalgebras) →
+  cross-vocab contrastive regularizer (same-anchor collapse mandate
+  named twice in iters 3 and 4 promoted to implemented; λ=1.0
+  goes 6/10 → 9/10). Each iteration was gradient-checked to machine
+  epsilon *before* training, cleanly separating "math is wrong" from
+  "architecture is wrong."
+  Extends the methodology pattern (mandates with ablate-able effects)
+  down to the substrate-construction layer: the algebra itself —
+  including the precise *choice of anchor representatives*, not just
+  the anchor count — is a designed primitive whose choice has
+  measurable consequences for which basins the optimizer can find
+  and what the basin structure means algebraically. **Solve-rate is
+  insufficient alone**: a scalar-collapse "solution" (both tokens on
+  K_0) passes XOR but fails the architectural claim, so the demo
+  reports raw AND non-trivial-subalgebra solve rate. With a strict
+  scalar-specialization classifier (K_0 dominant AND every other |α|
+  < 0.5), the two metrics coincide in all 120 trials: at our scale
+  the architecture never trivializes, even when basin-label
+  shorthand suggested otherwise. **Saddle-vs-basin verification**
+  goes further: initializing the embedding directly at scalar-trivial
+  (token 0 → pure +K_0, token 1 → pure -K_0) and training under
+  4 reg settings × 3 init magnitudes finds that 11/12 conditions
+  LEAVE scalar-trivial — the K_j, K_∞ components grow from 0 (at
+  init) to 0.20–0.58 magnitude. Scalar-trivial is a saddle, not a
+  basin. The architecture prefers to use its substrate is now a
+  tested dynamical property, not an inference from random-init
+  outcomes alone.
 
 ## Known limitations
 
@@ -613,6 +712,9 @@ Available demos, ordered by dependency:
 | `BioRelaxedCurationSnapshotDemo` | v3 P10 | **Iter 21 — arc best**: relaxed patterns + book-titles as 4th corpus; 60× less training, +12.6% spans vs iter 17 |
 | `BioWithTypedHeadsSnapshotDemo` | v3 P10 | **Iter 22**: typed-entity classifier (one-hot output) — three named layers stack cleanly |
 | `BioWithVectorTypedHeadsSnapshotDemo` | v3 P10 | Iter 23: substrate-authentic vector-anchor type head; recorded *negative* result (anchor collapse names the missing contrastive mandate) |
+| `KsqGradientCheckDemo`        | v3 P11   | Finite-difference verification of every KSQ gradient pathway (CE + per-vocab regularizer + cross-vocab regularizer) at machine epsilon |
+| `KsqParityDemo`               | v3 P11   | **KSQ T=2 XOR sweep**: 10 seeds × (λ, ν) grid. Reports basin distribution AND non-trivial-subalgebra solve rate (architectural claim: algebra must actually be used, not collapsed to scalar). Demonstrates cross-vocab regularizer rescues λ=1.0 from 6/10 to 9/10 |
+| `KsqScalarTrivialDemo`        | v3 P11   | **Saddle-vs-basin verification**: initialize at scalar-trivial (token 0 → +K_0, token 1 → -K_0), train under 4 reg settings × 3 init magnitudes. 11/12 conditions LEAVE the trivial config — scalar-trivial is a saddle, not a basin |
 
 ## Repository layout
 
@@ -633,6 +735,9 @@ strnn-model/src/main/java/sibarum/strnn/          ← THE FRAMEWORK
 │   │             # VectorTransform/Add/Sub/Mul, SimilarityGate; CachedItem/NetworkItem/NetworkCache
 │   └── semantic/  # parser + AST for the semantic ontology, multi-objective trainer, three scoring primitives
 ├── store/         # P10: NetworkStore, EntityStore<N,R>, VectorStore — persistence-boundary interfaces
+├── ksq/           # P11: fixed-algebra substrate. KsqAnchors (4 Möbius cardinals in M_2(R)),
+│                  # Mat2 (2x2 matmul/transpose helpers), KsqEmbeddingTable, KsqOutputHead,
+│                  # KsqModel (sum-pool → tanh α → Q → Q² → β → head). Parallel research line.
 └── demo/          # all runnable framework demos              ← Compose (the runnable demonstrations)
 
 mcc-elden-ring/src/main/java/sibarum/elden/       ← P10 DOWNSTREAM CONSUMER
@@ -645,7 +750,7 @@ mcc-elden-ring/src/main/java/sibarum/elden/       ← P10 DOWNSTREAM CONSUMER
 ├── training/      # TaggingTrainingData, TaggerPipeline
 └── demo/          # all NLP pipeline demos
 
-docs/              # design doc + phase result writeups (01..15)
+docs/              # design doc + phase result writeups (01..16)
 strnn-model/src/main/resources/sample-semantics.txt  # hand-crafted ontology used by v3 P1 demos
 download/          # external datasets pulled in for P10 (UD CoNLL-U, Parquet, Lexicanum); .gitignored
 download-files.md  # attribution paper-trail for downloaded datasets
