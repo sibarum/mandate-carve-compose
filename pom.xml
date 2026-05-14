@@ -11,6 +11,8 @@
     <modules>
         <module>strnn-model</module>
         <module>mcc-elden-ring</module>
+        <module>mcc-core</module>
+        <module>mcc-runtime</module>
     </modules>
 
     <properties>
