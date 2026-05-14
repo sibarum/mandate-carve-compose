@@ -321,7 +321,57 @@ runnable; each closes with a written-up diagnostic.
   ablate-able-effect discipline as the architecture and data
   mandates from iter 1–23) extends MCC down a level: the algebra
   itself is a designed primitive whose choice has measurable
-  consequences.
+  consequences. **iter 6** (the "elevator" arc — Babe Ruth call from
+  the elevator plan: remove tanh, treat embedding magnitude as
+  polynomial level, add projective anchor for level-lowering, predict
+  T=4 / T=8 parity become solvable): full arc landed in
+  `sibarum.strnn.ksq.elevator`, falsified empirically. Phase 0
+  diagnostic (ρ_∞ on iter-5) showed Outcome A — gradient WAS asking
+  for K_∞ direction. Phase 1 (unit-norm + magnitude-to-head):
+  improved solve rate (called-shot wrong, but the improvement was
+  diagnosable as extra head capacity, not elevator dynamics). Phase 2
+  (α = ℓ directly): diverged as predicted (3/10 solved + 7 NaN).
+  Phase 3 (add K_eMinus): stabilized at LR=0.1 (10/10 on XOR).
+  Phase 4 (T=2/T=4/T=8 prediction battery + gradient clipping for
+  safety): **both falsification criteria fired** for the
+  magnitude-as-level reading — T=4 and T=8 converge to predicting
+  uniform (CE = log 2, accuracy at chance); magnitudes do not cluster
+  monotonically with task degree. The bilinear step Q² has a hard
+  expressivity ceiling at degree 2 regardless of magnitude. **Spec
+  correction post-arc:** the elevator plan as written said
+  "magnitude is level"; the corrected reading is "level IS the
+  exponent" — level $z$ means $Q^z$ (via matrix exp for continuous
+  $z$), not ‖ℓ‖ growing. The empirical falsification stands for the
+  *tested* hypothesis (magnitude-as-level) and is consistent with the
+  corrected one (magnitude isn't level because magnitude isn't
+  exponent), but the exponent-as-level mechanism is a different
+  architecture and remains untested. A future arc with hand-rolled
+  matrix log/exp on $M_2(\mathbb{R})$ and Daleckii–Krein backward
+  would test it. iter-5 KSQ in `sibarum.strnn.ksq` is unchanged.
+  **iter 7** (two parallel attempts at exponent-as-level): (A)
+  `PowerLevelModel` adds a continuous scalar $n$ and signed-power
+  activation $y_i = \text{sign}(\ell_i)|\ell_i|^n$ before the lift
+  (degree of $S = Q^2$ is $2n$). Free-$n$ falsified: $n$ drifts
+  *downward* on T=4/T=8 rather than upward (T=4 0/10, T=8 0/10).
+  Frozen-$n$ ablation confirms the expressivity *is* there at $n=2$
+  (T=4 solves 10/10 at LR=0.01, embed_init=0.25); the failure is
+  gradient flow not reaching $n=2$ from $n=1$, not a missing
+  expressivity. T=8 at $n=4$ remains out of reach.
+  (B) `KSQP` (`sibarum.strnn.ksqp`) takes the opposite tack — drop
+  smooth flow, use a discrete integer $p$ updated by null-cone events
+  on the split-quaternion parameters. Different algebra
+  (4-component split quat with sandwich op), different aggregation
+  (split-quat product across tokens, or soft-attention KV pool).
+  Works on T=2 XOR variants (9–10/10), works on 2D continuous XOR via
+  KV cache (10/10 frozen and trainable keys), fails on the 8-cluster
+  alternating-label circle (0/10). The discrete mechanism mostly
+  doesn't fire on XOR (most solved seeds stay at $p=1$); its
+  contribution on higher-degree tasks is not yet demonstrated. Both
+  iter-7 attempts raise the expressivity ceiling beyond iter-5's
+  degree 2 but leave the *level discovery* mechanism as the open
+  problem. Code in `sibarum.strnn.ksq.elevator.PowerLevelModel` and
+  `sibarum.strnn.ksqp.*`; raw data in `ksqp-data/`. iter-5 KSQ in
+  `sibarum.strnn.ksq` is still unchanged.
 
 All implementation is in Java 25. MLPs and transformer blocks are
 written from scratch (~500 lines including backprop) with no
@@ -350,7 +400,10 @@ In dependency order — each builds on the previous:
 | [`13-carver-composes-from-cache.md`](docs/13-carver-composes-from-cache.md) | Carver composes from the cache's inventory; N-step composition via BFS reachability |
 | [`14-grand-finale.md`](docs/14-grand-finale.md) | The grand finale: a substrate that builds itself from a stream of mandates |
 | [`15-mandate-as-methodology.md`](docs/15-mandate-as-methodology.md) | Twenty-three iterations on real-world NLP; MCC as a development methodology applied at the architecture, data-selection, and output-encoding layers |
-| [`16-ksq-substrate.md`](docs/16-ksq-substrate.md) | KSQ: a fixed split-quaternion algebra as substrate; three architectural iterations restoring elliptic/hyperbolic basin symmetry; mandates at the substrate-construction layer |
+| [`16-ksq-substrate.md`](docs/16-ksq-substrate.md) | KSQ: a fixed split-quaternion algebra as substrate; five architectural iterations + saddle verification; iter-6 elevator-arc falsification (single bilinear step has degree-2 expressivity ceiling); iter-7 (two attempts at exponent-as-level — `PowerLevelModel` continuous, `KSQP` discrete) |
+| [`KSQP.md`](docs/KSQP.md) | KSQP plan: KSQ with discrete integer-valued polynomial-degree control by null-cone events; hybrid dynamical system on top of standard gradient training |
+| [`ksq_iter6_elevator_plan.md`](docs/ksq_iter6_elevator_plan.md) | iter-6 plan as written (magnitude-as-level); preserved for the falsification record |
+| [`ksq_iter7_iterated_squaring_plan.md`](docs/ksq_iter7_iterated_squaring_plan.md) | A third iter-7 direction (iterated squaring with depth mixing) that wasn't implemented — coherent candidate for follow-up |
 
 ## What has been demonstrated
 
@@ -715,6 +768,18 @@ Available demos, ordered by dependency:
 | `KsqGradientCheckDemo`        | v3 P11   | Finite-difference verification of every KSQ gradient pathway (CE + per-vocab regularizer + cross-vocab regularizer) at machine epsilon |
 | `KsqParityDemo`               | v3 P11   | **KSQ T=2 XOR sweep**: 10 seeds × (λ, ν) grid. Reports basin distribution AND non-trivial-subalgebra solve rate (architectural claim: algebra must actually be used, not collapsed to scalar). Demonstrates cross-vocab regularizer rescues λ=1.0 from 6/10 to 9/10 |
 | `KsqScalarTrivialDemo`        | v3 P11   | **Saddle-vs-basin verification**: initialize at scalar-trivial (token 0 → +K_0, token 1 → -K_0), train under 4 reg settings × 3 init magnitudes. 11/12 conditions LEAVE the trivial config — scalar-trivial is a saddle, not a basin |
+| `KsqRhoInfDiagnosticDemo`     | v3 P11 / iter 6 | Phase 0 of iter 6: measure ρ_∞(t) = Δlogits[v][KINF] per epoch on the iter-5 architecture. Confirms gradient was asking for K_∞ direction under tanh (Outcome A; seed 7: zero sign-flips across 4000 epochs) |
+| `ElevatorGradientCheckDemo`   | v3 P11 / iter 6 | Finite-difference verification of elevator KSQ's backward (unit-norm Jacobian + bilinear + readout + regularizers) at machine epsilon |
+| `ElevatorParityDemo`          | v3 P11 / iter 6 | XOR sweep on the final iter-6 elevator architecture (α = sumLogits direct, 5 anchors including K_eMinus). Stabilizes at LR=0.1, 10/10 across the (λ, ν) grid |
+| `ElevatorMagnitudeClusterDemo`| v3 P11 / iter 6 | **Phase 4 prediction battery (falsification of magnitude-as-level)**: T=2/T=4/T=8 parity with gradient clipping. T=2 solves 10/10; T=4 and T=8 collapse to predicting uniform. Magnitudes don't track task degree. Falsifies magnitude-as-level reading; consistent with the corrected exponent-as-level reading (which remains untested) |
+| `PowerLevelGradientCheckDemo` | v3 P11 / iter 7A | Finite-difference verification of `PowerLevelModel`'s backward (signed-power activation + chain into bilinear + scalar ∂L/∂n) at machine epsilon |
+| `PowerLevelParityDemo`        | v3 P11 / iter 7A | Free-$n$ prediction battery: T=2 solves 10/10 with $n$ ≈ 1.2; T=4 and T=8 fail because $n$ drifts *downward* (often negative) instead of upward. Falsifies the free-$n$ form of exponent-as-level |
+| `PowerLevelAblationDemo`      | v3 P11 / iter 7A | **Frozen-$n$ diagnostic**: $n=2$ on T=4 with LR=0.01, embed_init=0.25 solves 10/10 — the expressivity *is* there at $n=2$. Failure mode of free-$n$ is gradient flow not reaching it, not a missing ceiling. T=8 at $n=4$ still 0/10 |
+| `KsqpGradientCheckDemo`       | v3 P11 / iter 7B | Finite-difference verification of `KsqpModel`'s backward (lift → projection → sandwich → split-quat product → head) at machine epsilon, across uniform and mixed $p$ assignments |
+| `KsqpKvGradientCheckDemo`     | v3 P11 / iter 7B | Finite-difference verification of `KsqpKvModel`'s backward (soft-attention KV pool, frozen and trainable stored keys) at machine epsilon |
+| `KsqpXorDemo`                 | v3 P11 / iter 7B | KSQP indexed XOR with null-cone-event $p$ control and split-quat-product cross-token aggregation. Writes CSV trajectories to `ksqp-data/<tag>/`; 9/10 on the implemented sign-to-direction mapping |
+| `KsqpKvXorDemo`               | v3 P11 / iter 7B | KSQP soft-attention KV cache on continuous 2D XOR with 4 corner prototypes. 10/10 with both frozen and trainable stored keys |
+| `KsqpKvCircleDemo`            | v3 P11 / iter 7B | KSQP soft-attention KV on 8-cluster alternating-label circle (M=8). 0/10 stuck — scale-up failure case |
 
 ## Repository layout
 
@@ -736,8 +801,19 @@ strnn-model/src/main/java/sibarum/strnn/          ← THE FRAMEWORK
 │   └── semantic/  # parser + AST for the semantic ontology, multi-objective trainer, three scoring primitives
 ├── store/         # P10: NetworkStore, EntityStore<N,R>, VectorStore — persistence-boundary interfaces
 ├── ksq/           # P11: fixed-algebra substrate. KsqAnchors (4 Möbius cardinals in M_2(R)),
-│                  # Mat2 (2x2 matmul/transpose helpers), KsqEmbeddingTable, KsqOutputHead,
-│                  # KsqModel (sum-pool → tanh α → Q → Q² → β → head). Parallel research line.
+│   │              # Mat2 (2x2 matmul/transpose helpers), KsqEmbeddingTable, KsqOutputHead,
+│   │              # KsqModel (sum-pool → tanh α → Q → Q² → β → head). Parallel research line.
+│   └── elevator/  # iter 6: no-tanh variant + 5th anchor K_eMinus. Falsified at T=4 parity;
+│                  # bilinear-step expressivity ceiling is degree 2 regardless of magnitude.
+│                  # ElevatorAnchors, ElevatorEmbeddingTable, ElevatorOutputHead, ElevatorModel.
+│                  # iter 7A: PowerLevelModel — signed-power activation y=sign(ℓ)·|ℓ|^n with
+│                  # learnable scalar n. Free-n falsified; frozen-n at n=2 confirms T=4 expressivity.
+├── ksqp/          # iter 7B: KSQP — discrete-degree control via null-cone events on the
+│                  # split-quaternion parameters. SplitQuat (4-component split quat ops with
+│                  # full backward), PolyLift (Π-net monomial lift, parameter-free + backward),
+│                  # KsqpModel (indexed vocab: lift → P_d → sandwich → split-quat product
+│                  # across tokens → head), KsqpKvModel (content-addressable KV with soft
+│                  # attention; stored keys frozen or trainable).
 └── demo/          # all runnable framework demos              ← Compose (the runnable demonstrations)
 
 mcc-elden-ring/src/main/java/sibarum/elden/       ← P10 DOWNSTREAM CONSUMER

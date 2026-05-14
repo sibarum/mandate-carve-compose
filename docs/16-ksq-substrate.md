@@ -583,6 +583,320 @@ organization, by retention, *and* by attraction. The substrate-as-MCC-
 primitive framing earns more than a single result; it earns a
 convergent diagnostic.
 
+## Iter 6 — the elevator arc, falsified
+
+After phase 11 closed, the elevator plan (`docs/ksq_iter6_elevator_plan.md`)
+hypothesized that the iter-5 expressivity ceiling at T=2 XOR wasn't
+fundamental to single-bilinear-step architectures — it was tanh
+squashing the embedding magnitude, which destroys the polynomial-degree
+information that magnitude should encode. The hypothesis: remove tanh,
+treat magnitude as level, add a projective anchor for level-lowering,
+and T=4 / T=8 parity become solvable.
+
+The full Babe Ruth arc landed; the strong prediction did not.
+
+### Phase 0 — ρ_∞ diagnostic on iter-5 (positive sign)
+
+Instrumented the iter-5 training loop to measure
+$\rho_\infty(t) = \Delta\ell(t)[\text{KINF}]$ per epoch per token. Five
+seeds × (λ=0.1, ν=0.1) × 4000 epochs. **Outcome A confirmed:** all 10
+token-trajectories show persistent same-sign runs over thousands of
+steps. Seed 7 was the cleanest — both tokens had **zero sign-flips
+across all 4000 epochs**. Cumulative |ρ_∞| values clustered at 0.3–1.5.
+The gradient was in fact asking for the K_∞ direction; tanh was the
+lid. The diagnostic supported proceeding with confidence.
+
+### Phase 1 — unit-norm + magnitude-to-head (called-shot wrong, improved)
+
+Replaced tanh with $\alpha = \text{sumLogits} / \|\text{sumLogits}\|$
+(unit direction). Magnitude $r$ passed to the head as an extra input
+feature alongside β. Gradient check at machine epsilon.
+
+| | λ=0.0 | λ=0.1 | λ=1.0 |
+|---|---|---|---|
+| ν=0.0  | 10/10 | 10/9  | 10/10 |
+| ν=0.1  | 10/10 | 10/10 | 10/10 |
+
+(format: raw / non-trivial)
+
+**Phase 1 improved solve rates vs iter-5**, not degraded. The
+improvement was diagnosable: magnitude flowing to the head gives the
+classifier an extra feature the iter-5 architecture didn't have.
+"Phase 1 works" was a capacity gain, not elevator dynamics — magnitude
+doesn't flow through the bilinear step yet.
+
+### Phase 2 — α = ℓ directly (called-shot right, diverges)
+
+Dropped the direction/magnitude split. $\alpha = \ell$ flows into the
+bilinear step with unbounded magnitude. The plan predicted "results
+get worse — possibly divergent/stuck/zeroed."
+
+```
+              λ=0.00  λ=0.10  λ=1.00
+  ν=0.00       3/3    3/3     3/3
+  ν=0.10       3/3    3/3     3/3
+```
+
+Three seeds (3, 13, 17) solved with finite magnitudes (2.5–4.1) and
+non-K_0 specializations. The other seven diverged to NaN — bilinear
+step amplifies magnitude faster than CE stabilizes it.
+
+### Phase 3 — add K_eMinus placeholder (recovers at LR=0.1)
+
+Added the fifth anchor $K_{e^-} = (1-j)/2 =
+\bigl[\begin{smallmatrix}0&0\\0&1\end{smallmatrix}\bigr]$. Anchor set
+now spans 3-D with 2-D gauge freedom in α-space. With LR=1.0,
+divergence was worse (1/60 solved). With **LR=0.1**, the architecture
+stabilized:
+
+```
+              λ=0.00  λ=0.10  λ=1.00
+  ν=0.00      10/9   10/9    10/9
+  ν=0.10     10/10  10/10   10/10
+```
+
+K_eMinus appeared as the dominant anchor in 3+ trained basins.
+Magnitudes settled at 2.5–9.8. Phase 3 with lower LR is a working
+elevator architecture *at T=2*.
+
+### Phase 4 — prediction battery (falsification)
+
+Ran T=2, T=4, T=8 parity at the Phase 3 configuration (LR=0.1,
+λ=0.1, ν=0.1) plus gradient clipping (norm threshold 10) as the
+risk-register's safety measure. The strong elevator prediction:
+T=4 becomes solvable, magnitudes cluster monotonically with task
+degree.
+
+```
+T=2: 10/10 solved      mean ‖ℓ‖ = 2.80 / 3.20
+T=4:  0/10 solved      mean ‖ℓ‖ = 1.75 / 2.36   (LOWER than T=2!)
+T=8:  0/10 solved      mean ‖ℓ‖ = 2.48 / 3.05
+```
+
+**Both falsification criteria fire.** T=4 and T=8 converge to
+**predicting uniform** (CE ≈ log(2) = 0.693, accuracy near chance).
+The model isn't diverging — gradient clipping handles that — it's
+converged to "give up and predict 50/50." And magnitudes do NOT
+track degree monotonically: T=4 has *lower* mean magnitude than T=2.
+
+The plan named both outcomes as falsification:
+
+- *"If T=4 parity remains unsolvable even with tanh removed → the
+  expressivity ceiling wasn't tanh; it's something deeper."* ✓
+- *"Trained magnitudes do not cluster monotonically with task degree."* ✓
+
+### What the falsification tells us
+
+The bilinear step $Q^2$'s expressivity is capped at degree 2
+*regardless of magnitude*. Magnitude scales $Q^2$ quadratically as a
+scalar multiplier; it doesn't add polynomial degree to the features
+the readout can use. Higher-degree tasks need **actual operator
+composition** — applying the bilinear step more than once — not
+unbounded magnitude on a single step.
+
+**Spec correction (post-arc).** The elevator plan as written hypothesized
+*magnitude as level*; the corrected reading is **level as
+exponent**. The polynomial level $z$ is the power of $Q$ — level 1
+is $Q^1$, level 2 is $Q^2$ (what iter 5 / iter 6 implements), level 3
+is $Q^3 = Q \cdot Q \cdot Q$, level $z$ generally is $Q^z$ computed
+via the matrix-exponent formula $\exp(z \log Q)$ for continuous $z$.
+Within-level operators ($K_i$, $K_j$) preserve the exponent. The
+parabolic channel ($K_\infty$) corresponds to integration (raises
+the exponent by 1); the projective channel corresponds to
+differentiation (lowers by 1).
+
+Under that reading the iter-6 falsification is more precisely framed:
+**magnitude-as-level is falsified**, because letting ‖ℓ‖ grow doesn't
+move the architecture to $Q^3$ or $Q^4$ — it just scales $Q^2$ by a
+constant. The empirical T=4 / T=8 result is consistent with the
+corrected reading (yes, magnitude isn't level — exactly because
+magnitude isn't exponent). The exponent-as-level mechanism is a
+different architecture and remains **untested** in iter 6.
+
+**Methodology lesson.** The full Babe Ruth arc was useful precisely
+because it ran. Each phase's predicted-and-confirmed degradation
+sharpened what was being tested; only Phase 4 had a strong falsifiable
+prediction, and it falsified cleanly. The cleaner discipline lesson:
+when the spec is later corrected, the empirical result still stands as
+"this specific hypothesis was tested and falsified" — it just doesn't
+generalize to "the elevator picture wholesale." Negative results that
+name the architectural ceiling for the *tested* hypothesis are equal
+in standing to positive results, and they don't preclude the corrected
+hypothesis being right.
+
+**What an exponent-as-level architecture would require (future iter):**
+
+1. *Matrix log/exp on $M_2(\mathbb{R})$.* Spectral decomposition of $Q$
+   followed by elementwise log/exp on eigenvalues, then recomposition.
+   The eigenvalue branch cases (real distinct / repeated / complex
+   conjugate, plus signs) need explicit handling.
+
+2. *Backward through $Q^z$.* The Daleckii–Krein formula gives the
+   derivative of matrix functions w.r.t. their matrix argument; it has
+   to be hand-rolled and gradient-checked against finite differences.
+   This is the gnarly piece.
+
+3. *Exponent $z$ from the embedding without discrete sampling.* The
+   plan ruled out learned gates / discrete level / straight-through.
+   A continuous $z$ tied to some scalar of the embedding (perhaps the
+   $K_\infty$ component of α, perhaps something else) lets the
+   optimizer drive level up smoothly. Parabolic resonance — sustained
+   K_∞-direction velocity moving $z$ across an integer boundary —
+   would then be a genuine dynamical event.
+
+4. *True projective anchor via Traction.* Still relevant for the
+   level-lowering channel. Probably required for $z < 0$ regimes
+   (differentiation past constants).
+
+The iter-6 code lives in `sibarum.strnn.ksq.elevator` as a parallel
+module. iter-5 KSQ is preserved unchanged in `sibarum.strnn.ksq`.
+The elevator code is runnable but tests only the magnitude-as-level
+hypothesis. An iter-7 or follow-up arc testing exponent-as-level is
+the natural next step.
+
+## Iter 7 — two attempts at exponent-as-level
+
+The iter-6 spec-correction named the missing mechanism: level should
+be the *exponent* of $Q$, not its norm. Two parallel architectures
+were prototyped against that reading; both falsified the strong form
+of their hypothesis and left a sharper diagnostic question behind.
+
+### Attempt A — PowerLevelModel (signed-power activation)
+
+Adds one continuous scalar $n$ and one per-component activation
+between the pooled embedding and the algebra lift:
+
+$$y_i = \text{sign}(\ell_i) \cdot |\ell_i|^n, \qquad Q = \sum_i y_i K_i, \qquad S = Q^2.$$
+
+The polynomial degree of $S$ in $\ell$ is $2n$. $n$ is unconstrained
+(no softplus, no clamp — per the no-normalization-crutches discipline);
+gradient flows through both $\partial y/\partial \ell$ and
+$\partial y/\partial n$. The prediction: free $n$ should climb from
+$n_\text{init}=1$ toward $n=2$ on T=4 parity and $n=4$ on T=8.
+
+Gradient check passes at machine epsilon
+(`PowerLevelGradientCheckDemo`). Empirical result
+(`PowerLevelParityDemo`, 10 seeds):
+
+```
+T=2:  10/10 solved   final n cluster mean ≈ +1.21  (predicted ≈ 1)
+T=4:   0/10 solved   final n mean ≈ -8.8           (predicted ≈ 2)
+T=8:   0/10 solved   final n mean ≈ -4.5           (predicted ≈ 4)
+```
+
+$n$ drifts *downward*, often into negative territory, and several
+seeds diverge to NaN or astronomical magnitudes. The free-$n$
+mechanism is falsified.
+
+The ablation (`PowerLevelAblationDemo`) disentangles "is the
+expressivity there at $n=2$?" from "does the optimizer reach $n=2$?":
+
+```
+T=4, n frozen at 1.0 (recover iter-6):           0/10  ✓ reproduces
+T=4, n frozen at 2.0, LR=0.1:                    0/10 diverged
+T=4, n frozen at 2.0, LR=0.01, embed_init=0.25:  10/10 ✓ expressivity!
+T=4, n frozen at 2.0, LR=0.001:                   6/10 slower convergence
+T=8, n frozen at 4.0, LR=0.001, embed_init=0.25:  0/10
+```
+
+The architecture *can* express T=4 parity at $n=2$ — the
+expressivity ceiling is genuinely raised by the activation. The
+gradient-flow path from $n=1$ to $n=2$ is the failure mode, not the
+geometry. T=8 at $n=4$ remains out of reach even with conservative
+hyperparameters; optimization difficulty scales with target $n$.
+
+The honest reading: signed-power activation provides exponent-as-level
+expressivity, but the obvious gradient-descent route doesn't navigate
+the $n$-axis well. A future arc would need a different mechanism for
+discovering the right $n$ — discrete sampling, scheduled annealing,
+algebra-driven event triggers, or a curriculum that lets $n$ grow
+from below — rather than relying on smooth gradient flow alone.
+
+### Attempt B — KSQP (discrete-degree control with null-cone events)
+
+A second iter-7 direction (plan in `docs/KSQP.md`) drops the smooth
+mechanism entirely and adds a discrete, integer-valued degree
+parameter $p$ updated by null-cone *events* on the split-quaternion
+parameters. The algebra changes from the $M_2(\mathbb{R})$ embedding
+to a 4-component split quaternion in $\{1, i, j, k\}$ with signature
+$(++--)$; the bilinear step becomes the conjugate sandwich
+$y = q \cdot x \cdot \bar q$; the per-token input is a fixed random
+$k_v \in \mathbb{R}^n$ lifted to all degree-$p_v$ monomials, then
+projected back to $\mathbb{R}^4$ by a learned $P_{p_v}$.
+
+Forward pipeline (single token):
+
+$$m = \text{lift}_{p_v}(k_v), \quad x = P_{p_v} \cdot m, \quad y = q_v \cdot x \cdot \bar q_v.$$
+
+Aggregation across the sequence is the **split-quaternion product**
+$y_\text{seq} = y_0 \cdot y_1 \cdots y_{T-1}$ (sum-pool collapses
+XOR's four inputs to three collinear points; concat is linear in the
+two token features and cannot represent XOR; split-quat product
+introduces the needed non-commutative bilinear cross-token mixing).
+
+Discrete $p$-control: track the sign of the split-quaternion norm
+$N(q_v) = q_0^2 + q_1^2 - q_2^2 - q_3^2$ across optimizer steps. A
+sign-flip is a null-cone crossing event; on each event $p_v$
+increments or decrements (by the chosen sign-to-direction mapping)
+and $q_v$ is restored to its initial value. The plan deferred
+hysteresis and gradient-directed teleport as later refinements.
+
+Gradient check passes (`KsqpGradientCheckDemo`,
+`KsqpKvGradientCheckDemo`).
+
+KSQP comes in two variants:
+
+- **`KsqpModel`** — indexed key-value (per-token vocab lookup); the
+  closest analogue of iter-5/6 KSQ.
+- **`KsqpKvModel`** — content-addressable cache (M stored prototypes
+  retrieved by soft-attention similarity to a continuous query). Adds
+  a query/key separation absent from earlier KSQ work. Stored keys
+  can be frozen or trainable.
+
+Empirical results (10 seeds, raw CSVs in `ksqp-data/`):
+
+| run | task | solved | notes |
+|---|---|---|---|
+| `proper-arch` | T=2 XOR (indexed) | 0/10 stuck | early run before the split-quat-product aggregation was wired in |
+| `split-quat-product` | T=2 XOR (indexed) | 9/10 | architecture working; one seed stuck at chance |
+| `original-mapping` | T=2 XOR (indexed) | 7/10 | sign-flip → $\Delta p$ mapping: $+\to-$ ⇒ $p{+}{+}$ |
+| `flipped-mapping` | T=2 XOR (indexed) | 9/10 | flipped mapping: $+\to-$ ⇒ $p{-}{-}$ (slight A/B advantage) |
+| `kv-xor-2d` | 2D continuous XOR (KV, frozen keys) | 10/10 | M=4 prototypes at unit-square corners |
+| `kv-xor-2d-trainable-keys` | 2D continuous XOR (KV, learned keys) | 10/10 | KV learns key positions from random init |
+| `kv-circle-8` | 8-cluster alternating-label circle (KV) | 0/10 stuck | M=8 fails — modes collapse, attention diffuses |
+
+KSQP works on tasks that fit a few prototypes; it doesn't scale up
+to the 8-cluster alternating-label circle without further work. The
+discrete-event mechanism does fire (events column in the CSVs is
+non-zero on several seeds) but most successful solves on XOR happen
+*without* any events at $p=1$ throughout — meaning iter-5's degree-2
+expressivity is enough for XOR. The mechanism's contribution on
+higher-degree tasks is not yet demonstrated in the data.
+
+### Where iter 7 leaves the picture
+
+Both attempts add expressivity beyond iter-5's degree-2 ceiling:
+PowerLevelModel by raising the embedding to the $n$-th power before
+the bilinear step, KSQP by lifting the per-token input to a
+degree-$p$ monomial vector. Both falsify the *strong* version of
+their hypothesis — neither demonstrates automatic level discovery
+through training on T=4 or higher parity. The architectural picture
+(algebra + a level mechanism) survives both falsifications; the
+*discovery* mechanism (how training routes toward the right level)
+is the open problem.
+
+Code is preserved as two parallel modules:
+
+- `sibarum.strnn.ksq.elevator.PowerLevelModel` (continuous exponent,
+  free-$n$ falsified, frozen-$n$ at $n=2$ confirms T=4 expressivity).
+- `sibarum.strnn.ksqp` (discrete degree with null-cone events; works
+  on XOR variants, falls over on 8-cluster circle).
+
+The iterated-squaring direction in
+`docs/ksq_iter7_iterated_squaring_plan.md` was a third candidate
+that wasn't implemented in this iteration. iter-5 KSQ in
+`sibarum.strnn.ksq` is unchanged.
+
 ## Known limitations
 
 - **Anchors are hand-picked.** The four Möbius cardinals cover the
