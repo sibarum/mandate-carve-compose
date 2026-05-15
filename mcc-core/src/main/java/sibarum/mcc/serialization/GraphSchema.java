@@ -1,12 +1,12 @@
 package sibarum.mcc.serialization;
 
-import com.fasterxml.jackson.annotation.JsonInclude;
-
 import java.util.List;
 import java.util.Map;
 
 /**
- * JSON-mapped POJO of a serialized {@code component.mcc} graph.
+ * Reflection-free POJO of a serialized {@code component.mcc} graph.
+ * Marshalling lives in {@link GraphSchemaCodec}; this file is just
+ * the data shape — no annotations, no Jackson dependency.
  *
  * <pre>
  * {
@@ -22,10 +22,9 @@ import java.util.Map;
  * }
  * </pre>
  *
- * <p>Field naming follows the Jackson default (record component names);
- * tooling that produces this format must use the same names.
+ * <p>Field names in the JSON are the record component names; tooling
+ * that produces this format must use the same names.
  */
-@JsonInclude(JsonInclude.Include.NON_NULL)
 public record GraphSchema(
         int schemaVersion,
         List<NodeDesc> nodes,

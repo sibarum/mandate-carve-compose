@@ -1,6 +1,6 @@
 package sibarum.mcc.op;
 
-import sibarum.mcc.primitive.Primitive;
+import sibarum.mcc.primitive.Differentiable;
 import sibarum.mcc.value.MatrixValue;
 import sibarum.mcc.value.Value;
 import sibarum.mcc.value.ValueType;
@@ -9,8 +9,11 @@ import java.util.List;
 
 /**
  * Primitive: elementwise hyperbolic tangent. {@code x_i -> tanh(x_i)}.
+ * Backward: {@code dL/dx_i = dL/dy_i · (1 − y_i²)}.
  */
-public final class Tanh implements Primitive {
+public final class Tanh implements Differentiable {
+
+    private double[] lastY;
 
     @Override
     public String name() {
@@ -37,6 +40,18 @@ public final class Tanh implements Primitive {
             }
             y[i] = Math.tanh(x[i]);
         }
+        lastY = y.clone();
         return new MatrixValue(y);
+    }
+
+    @Override
+    public List<Value> backward(Value gradOutput) {
+        if (lastY == null) throw new IllegalStateException("Tanh backward without prior apply");
+        double[] g = ((MatrixValue) gradOutput).data();
+        double[] dx = new double[g.length];
+        for (int i = 0; i < g.length; i++) {
+            dx[i] = g[i] * (1.0 - lastY[i] * lastY[i]);
+        }
+        return List.of(new MatrixValue(dx));
     }
 }

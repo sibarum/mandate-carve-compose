@@ -46,6 +46,28 @@ public final class SymbolEmbeddingTable {
     }
 
     /**
+     * Direct accessor used by serialization. Returns the table's
+     * internal storage for {@code symbol}, or {@code null} if absent.
+     * Callers must not mutate the returned array except for in-place
+     * gradient updates via {@link #update}.
+     */
+    public double[] rawVector(String symbol) {
+        return embeddings.get(symbol);
+    }
+
+    /**
+     * Overwrite the embedding for {@code symbol}, allocating it if
+     * absent. Used by importers restoring serialized state.
+     */
+    public void put(String symbol, double[] vector) {
+        if (vector.length != dim) {
+            throw new IllegalArgumentException(
+                    "vector dim " + vector.length + " != table dim " + dim);
+        }
+        embeddings.put(symbol, vector.clone());
+    }
+
+    /**
      * Returns the embedding vector for {@code symbol}, generating a
      * random initial vector if the symbol has not been seen. The
      * returned array is the table's internal storage; callers must

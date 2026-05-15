@@ -60,11 +60,12 @@ public final class MlpBlock implements Trainable, Parameterized, Configurable {
     }
 
     @Override
-    public void backward(Value target) {
-        if (!(target instanceof MatrixValue mt)) {
-            throw new IllegalArgumentException("MlpBlock target must be MatrixValue");
+    public List<Value> backward(Value gradOutput) {
+        if (!(gradOutput instanceof MatrixValue mg)) {
+            throw new IllegalArgumentException("MlpBlock gradOutput must be MatrixValue");
         }
-        mlp.backward(mt.data());
+        double[] dx = mlp.backward(mg.data());
+        return List.of(new MatrixValue(dx));
     }
 
     @Override

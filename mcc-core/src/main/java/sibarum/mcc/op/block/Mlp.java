@@ -77,21 +77,17 @@ public final class Mlp {
     }
 
     /**
-     * Computes gradients given a target output. Accumulates into
-     * {@code gradWeights}/{@code gradBiases}. Returns {@code dInput}
-     * so callers can chain gradients further back if needed.
+     * Computes gradients given the output gradient {@code dL/dY}.
+     * Accumulates into {@code gradWeights}/{@code gradBiases} and
+     * returns {@code dL/dX} so callers can chain gradients further back.
      */
-    public double[] backward(double[] target) {
-        if (target.length != outputDim()) {
+    public double[] backward(double[] gradOutput) {
+        if (gradOutput.length != outputDim()) {
             throw new IllegalArgumentException(
-                    "expected target dim " + outputDim() + ", got " + target.length);
+                    "expected gradOutput dim " + outputDim() + ", got " + gradOutput.length);
         }
         int numLayers = sizes.length - 1;
-        double[] output = activations[numLayers - 1];
-        double[] delta = new double[output.length];
-        for (int i = 0; i < output.length; i++) {
-            delta[i] = output[i] - target[i];
-        }
+        double[] delta = gradOutput.clone();
 
         for (int l = numLayers - 1; l >= 0; l--) {
             double[] prevAct = (l == 0) ? cachedInput : activations[l - 1];

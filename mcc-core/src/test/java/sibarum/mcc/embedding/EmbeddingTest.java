@@ -68,7 +68,10 @@ class EmbeddingTest {
 
         double initialL2 = distance(start.data(), target);
 
-        e.backward(new MatrixValue(target));
+        // Gradient-flow shape: gradOut = output - target under MSE.
+        double[] gradOut = new double[target.length];
+        for (int i = 0; i < target.length; i++) gradOut[i] = start.data()[i] - target[i];
+        e.backward(new MatrixValue(gradOut));
         e.step(0.5);  // big step, should clearly move toward target
 
         MatrixValue after = (MatrixValue) e.apply(List.of(sym));

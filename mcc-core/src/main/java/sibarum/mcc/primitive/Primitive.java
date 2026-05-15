@@ -12,9 +12,16 @@ import java.util.List;
  * produces a single output value.
  *
  * <p>Primitives are stateless across calls unless they extend
- * {@link Trainable}, in which case implementations may cache
- * intermediate state from the most recent {@code apply} for use by a
- * subsequent {@code backward}.
+ * {@link Trainable} or {@link Differentiable}, in which case
+ * implementations may cache intermediate state from the most recent
+ * {@code apply} for use by a subsequent {@code backward}.
+ *
+ * <p>{@link #inversion} returns the primitive's inversion strategy
+ * for the carver. Stateless deterministic primitives can usually
+ * invert exactly; trainable primitives typically return one of
+ * several plausible candidates via {@link InversionContext}. The
+ * default is {@link Inversion#NONE} — primitives that don't override
+ * it can still appear in graphs but are dead ends for the carver.
  */
 public interface Primitive {
     String name();
@@ -24,4 +31,8 @@ public interface Primitive {
     ValueType outputType();
 
     Value apply(List<Value> inputs);
+
+    default Inversion inversion() {
+        return Inversion.NONE;
+    }
 }

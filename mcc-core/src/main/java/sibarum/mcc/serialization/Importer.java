@@ -1,6 +1,5 @@
 package sibarum.mcc.serialization;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import sibarum.mcc.graph.CompGraphNode;
 import sibarum.mcc.graph.ComputationGraph;
 import sibarum.mcc.graph.SlotSource;
@@ -14,6 +13,7 @@ import sibarum.mcc.primitive.PrimitiveRegistry;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -29,7 +29,6 @@ import java.util.Map;
  */
 public final class Importer {
 
-    private final ObjectMapper json = new ObjectMapper();
     private final PrimitiveRegistry registry;
 
     public Importer(PrimitiveRegistry registry) {
@@ -46,7 +45,8 @@ public final class Importer {
         Path graphPath = dir.resolve("graph.json");
         Path paramsPath = dir.resolve("params.bin");
 
-        GraphSchema schema = json.readValue(graphPath.toFile(), GraphSchema.class);
+        String graphJson = Files.readString(graphPath, StandardCharsets.UTF_8);
+        GraphSchema schema = GraphSchemaCodec.fromJson(graphJson);
         if (schema.schemaVersion() != GraphSchema.CURRENT_VERSION) {
             throw new IOException("unsupported schema version: " + schema.schemaVersion()
                     + " (expected " + GraphSchema.CURRENT_VERSION + ")");

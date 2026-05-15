@@ -1,5 +1,6 @@
 package sibarum.mcc.embedding;
 
+import sibarum.mcc.primitive.Inversion;
 import sibarum.mcc.primitive.Primitive;
 import sibarum.mcc.value.MatrixValue;
 import sibarum.mcc.value.StringValue;
@@ -48,5 +49,17 @@ public final class Lookup implements Primitive {
                 .orElseThrow(() -> new IllegalStateException(
                         "lookup: no nearest neighbour (empty table or zero-norm query)"));
         return new StringValue(hit);
+    }
+
+    @Override
+    public Inversion inversion() {
+        // Exact inversion: lookup→s requires the vector that the table
+        // stores for symbol s.
+        return (target, ctx) -> {
+            if (!(target instanceof StringValue sv)) return null;
+            double[] v = table.rawVector(sv.s());
+            if (v == null) return null;
+            return List.of(new MatrixValue(v));
+        };
     }
 }

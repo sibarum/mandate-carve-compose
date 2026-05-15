@@ -2,6 +2,7 @@ package sibarum.mcc.op;
 
 import sibarum.mcc.op.util.TotalArithmetic;
 import sibarum.mcc.primitive.Configurable;
+import sibarum.mcc.primitive.Inversion;
 import sibarum.mcc.primitive.Parameterized;
 import sibarum.mcc.primitive.Trainable;
 import sibarum.mcc.value.MatrixValue;
@@ -105,31 +106,35 @@ public final class Linear implements Trainable, Parameterized, Configurable {
     }
 
     @Override
-    public void backward(Value target) {
+    public List<Value> backward(Value gradOutput) {
         if (lastInput == null || lastOutput == null) {
             throw new IllegalStateException("backward called without prior apply");
         }
-        if (!(target instanceof MatrixValue mt)) {
-            throw new IllegalArgumentException("Linear target must be MatrixValue");
+        if (!(gradOutput instanceof MatrixValue mg)) {
+            throw new IllegalArgumentException("Linear gradOutput must be MatrixValue");
         }
-        double[] t = mt.data();
-        if (t.length != outDim) {
+        double[] dy = mg.data();
+        if (dy.length != outDim) {
             throw new IllegalArgumentException(
-                    "target dim " + t.length + " != outDim " + outDim);
+                    "gradOutput dim " + dy.length + " != outDim " + outDim);
         }
-        double[] dy = new double[outDim];
-        for (int i = 0; i < outDim; i++) {
-            dy[i] = lastOutput[i] - t[i];
-        }
-        pendingDw = new double[outDim][inDim];
+        // Parameter gradients (accumulate so repeat apply→backward sums them).
+        if (pendingDw == null) pendingDw = new double[outDim][inDim];
+        if (withBias && pendingDb == null) pendingDb = new double[outDim];
         for (int i = 0; i < outDim; i++) {
             for (int j = 0; j < inDim; j++) {
-                pendingDw[i][j] = dy[i] * lastInput[j];
+                pendingDw[i][j] += dy[i] * lastInput[j];
             }
+            if (withBias) pendingDb[i] += dy[i];
         }
-        if (withBias) {
-            pendingDb = dy.clone();
+        // Input gradient: dL/dx[j] = Σ_i W[i,j] * dy[i].
+        double[] dx = new double[inDim];
+        for (int j = 0; j < inDim; j++) {
+            double s = 0.0;
+            for (int i = 0; i < outDim; i++) s += w[i][j] * dy[i];
+            dx[j] = s;
         }
+        return List.of(new MatrixValue(dx));
     }
 
     @Override
@@ -150,6 +155,17 @@ public final class Linear implements Trainable, Parameterized, Configurable {
     @Override
     public Object trainableIdentity() {
         return this;
+    }
+
+    @Override
+    public Inversion inversion() {
+        // Trainable: the carver doesn't need a specific input value, just
+        // *some* matrix of the right dim it can bind further upstream. Ask
+        // the context for an anchor; the trainable will learn to map it.
+        final int wantDim = inDim;
+        return (target, ctx) -> ctx.anchorByMatrixDim(wantDim)
+                .map(v -> List.<sibarum.mcc.value.Value>of(v))
+                .orElse(null);
     }
 
     @Override

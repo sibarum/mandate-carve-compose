@@ -1,7 +1,5 @@
 package sibarum.mcc.serialization;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.SerializationFeature;
 import sibarum.mcc.graph.CompGraphNode;
 import sibarum.mcc.graph.ComputationGraph;
 import sibarum.mcc.graph.SlotSource;
@@ -11,6 +9,7 @@ import sibarum.mcc.primitive.Primitive;
 
 import java.io.IOException;
 import java.io.OutputStream;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -36,11 +35,7 @@ import java.util.Map;
  */
 public final class Exporter {
 
-    private final ObjectMapper json;
-
     public Exporter() {
-        this.json = new ObjectMapper();
-        json.enable(SerializationFeature.INDENT_OUTPUT);
     }
 
     /** Description of a named root input the runtime should accept. */
@@ -106,7 +101,7 @@ public final class Exporter {
         );
 
         Path graphPath = outDir.resolve("graph.json");
-        json.writeValue(graphPath.toFile(), schema);
+        Files.writeString(graphPath, GraphSchemaCodec.toJson(schema), StandardCharsets.UTF_8);
     }
 
     private record ParameterizedNode(String nodeId, Parameterized p) {}

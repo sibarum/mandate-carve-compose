@@ -1,6 +1,6 @@
 package sibarum.mcc.op;
 
-import sibarum.mcc.primitive.Primitive;
+import sibarum.mcc.primitive.Differentiable;
 import sibarum.mcc.value.MatrixValue;
 import sibarum.mcc.value.Value;
 import sibarum.mcc.value.ValueType;
@@ -9,18 +9,19 @@ import java.util.List;
 
 /**
  * Primitive: unit-norm projection. {@code u -> u / ‖u‖}. Zero-norm
- * inputs short-circuit to the zero vector — keeps the substrate total
- * (no NaN from 0/0) without claiming a spurious unit direction.
+ * input short-circuits to the zero vector and produces a zero
+ * gradient (the unit-norm Jacobian is undefined at the origin).
  *
- * <p>The standard L2-normalize Jacobian
- * {@code ∂(u/‖u‖)/∂u = (I − ŷŷᵀ) / ‖u‖} is the gradient pattern any
- * training-time backward will need; this primitive is forward-only for
- * MVP. A future Differentiable extension will supply the analytic
- * backward.
+ * <p>Backward: standard L2-normalize Jacobian
+ * {@code (I − ŷŷᵀ)/‖u‖}. Concretely,
+ * {@code dL/du_j = (gradOut_j − ŷ_j · ⟨ŷ, gradOut⟩) / ‖u‖}.
  */
-public final class Normalize implements Primitive {
+public final class Normalize implements Differentiable {
 
     private static final double EPS = 1e-12;
+
+    private double[] lastUnit;
+    private double lastNorm;
 
     @Override
     public String name() {
@@ -50,11 +51,31 @@ public final class Normalize implements Primitive {
         double norm = Math.sqrt(s);
         double[] out = new double[a.length];
         if (norm <= EPS) {
+            lastUnit = out.clone();
+            lastNorm = 0.0;
             return new MatrixValue(out);
         }
         for (int i = 0; i < a.length; i++) {
             out[i] = a[i] / norm;
         }
+        lastUnit = out.clone();
+        lastNorm = norm;
         return new MatrixValue(out);
+    }
+
+    @Override
+    public List<Value> backward(Value gradOutput) {
+        if (lastUnit == null) throw new IllegalStateException("Normalize backward without prior apply");
+        double[] g = ((MatrixValue) gradOutput).data();
+        double[] dx = new double[g.length];
+        if (lastNorm <= EPS) {
+            return List.of(new MatrixValue(dx));
+        }
+        double dot = 0.0;
+        for (int i = 0; i < g.length; i++) dot += lastUnit[i] * g[i];
+        for (int j = 0; j < g.length; j++) {
+            dx[j] = (g[j] - lastUnit[j] * dot) / lastNorm;
+        }
+        return List.of(new MatrixValue(dx));
     }
 }

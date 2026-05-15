@@ -1,7 +1,7 @@
 package sibarum.mcc.op;
 
 import sibarum.mcc.primitive.Configurable;
-import sibarum.mcc.primitive.Primitive;
+import sibarum.mcc.primitive.Differentiable;
 import sibarum.mcc.value.MatrixValue;
 import sibarum.mcc.value.Value;
 import sibarum.mcc.value.ValueType;
@@ -13,11 +13,15 @@ import java.util.Map;
  * Primitive: take a contiguous slice {@code [from, to)} of an input
  * vector. Configured at construction (the slice range is a structural
  * parameter of the node, not a runtime input).
+ *
+ * <p>Backward: zero-pad. {@code dL/dx[from:to] = gradOut};
+ * {@code dL/dx[other indices] = 0}.
  */
-public final class Slice implements Primitive, Configurable {
+public final class Slice implements Differentiable, Configurable {
 
     private final int from;
     private final int to;
+    private int lastInputLength;
 
     public Slice(int from, int to) {
         if (from < 0 || to < from) {
@@ -60,6 +64,19 @@ public final class Slice implements Primitive, Configurable {
         }
         double[] out = new double[to - from];
         System.arraycopy(x, from, out, 0, to - from);
+        lastInputLength = x.length;
         return new MatrixValue(out);
+    }
+
+    @Override
+    public List<Value> backward(Value gradOutput) {
+        if (lastInputLength == 0) throw new IllegalStateException("Slice backward without prior apply");
+        double[] g = ((MatrixValue) gradOutput).data();
+        if (g.length != to - from) {
+            throw new IllegalArgumentException("Slice gradOutput dim mismatch");
+        }
+        double[] dx = new double[lastInputLength];
+        System.arraycopy(g, 0, dx, from, g.length);
+        return List.of(new MatrixValue(dx));
     }
 }

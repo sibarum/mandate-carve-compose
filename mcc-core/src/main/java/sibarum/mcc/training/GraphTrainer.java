@@ -2,36 +2,41 @@ package sibarum.mcc.training;
 
 import sibarum.mcc.graph.CompGraphNode;
 import sibarum.mcc.graph.ComputationGraph;
+import sibarum.mcc.graph.SlotSource;
+import sibarum.mcc.primitive.Differentiable;
+import sibarum.mcc.primitive.Primitive;
 import sibarum.mcc.primitive.Trainable;
+import sibarum.mcc.value.MatrixValue;
+import sibarum.mcc.value.NumberValue;
 import sibarum.mcc.value.Value;
 
+import java.util.Collections;
 import java.util.IdentityHashMap;
 import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.function.BiConsumer;
 
 /**
- * Minimal trainer for a {@link ComputationGraph} whose terminal node
- * wraps a {@link Trainable}. Each example:
+ * Trainer for a {@link ComputationGraph}. Per example:
  *
  * <ol>
- *   <li>The caller-provided {@code rootBinder} converts the example's
- *       named inputs into root bindings on the graph.</li>
- *   <li>{@link ComputationGraph#execute} runs forward.</li>
- *   <li>For every node whose primitive is {@link Trainable},
- *       {@code backward(example.target())} is invoked. Multiple
- *       trainables sharing the same {@link Trainable#trainableIdentity}
- *       receive backward only once.</li>
- *   <li>After the epoch (or after each example, depending on
- *       {@code stepEveryExample}), every unique trainable's
- *       {@code step(lr)} is invoked.</li>
+ *   <li>{@code rootBinder} binds the example's named inputs to graph roots.</li>
+ *   <li>{@code graph.execute()} runs forward.</li>
+ *   <li>The terminal gradient is computed as {@code output − target}
+ *       (MSE convention). It flows backward through the graph's
+ *       reverse topological order; at each {@link Differentiable} node,
+ *       {@code backward(gradAtOutput)} produces input-slot gradients
+ *       that are accumulated into the upstream nodes' incoming-gradient
+ *       slots. Every {@link Trainable}'s {@code step(lr)} is invoked
+ *       once per epoch (or once per example, see
+ *       {@code stepEveryExample}), identity-deduped via
+ *       {@link Trainable#trainableIdentity}.</li>
  * </ol>
  *
- * <p>MVP scope: the target-based backward contract from {@link Trainable}
- * means this trainer only fully supports graphs whose Trainables can
- * accept the example's terminal target. For graphs with multiple
- * chained Trainables the per-trainable targeting is up to the caller
- * (e.g. by carving simulated values, a future capability).
+ * <p>Multi-trainable chains (Embed → Linear → Relu → Linear → Softmax,
+ * etc.) train through the standard gradient flow.
  */
 public final class GraphTrainer {
 
@@ -55,8 +60,8 @@ public final class GraphTrainer {
     }
 
     /**
-     * Run one epoch through the corpus. Returns the running-mean
-     * squared error against {@code Example.target} (for diagnostics).
+     * Run one epoch through the corpus. Returns mean half-MSE loss
+     * for diagnostics.
      */
     public double trainEpoch(Corpus corpus) {
         IdentityHashMap<Object, Trainable> pendingSteps = new IdentityHashMap<>();
@@ -67,8 +72,9 @@ public final class GraphTrainer {
             Example ex = it.next();
             rootBinder.accept(graph, ex);
             Value out = graph.execute();
-            sumLoss += halfMseToTarget(out, ex.target());
-            backwardAllTrainables(ex.target(), pendingSteps);
+            sumLoss += halfMse(out, ex.target());
+            Value terminalGrad = mseGrad(out, ex.target());
+            backpropFromTerminal(terminalGrad, pendingSteps);
             count++;
             if (stepEveryExample) {
                 stepPending(pendingSteps);
@@ -80,17 +86,59 @@ public final class GraphTrainer {
         return count == 0 ? 0.0 : sumLoss / count;
     }
 
-    private void backwardAllTrainables(Value target, IdentityHashMap<Object, Trainable> pending) {
-        IdentityHashMap<Object, Boolean> doneThisExample = new IdentityHashMap<>();
-        for (CompGraphNode n : graph.nodes()) {
-            if (n.tNode().primitive() instanceof Trainable t) {
-                Object id = t.trainableIdentity();
-                if (doneThisExample.containsKey(id)) continue;
-                doneThisExample.put(id, Boolean.TRUE);
-                t.backward(target);
-                pending.put(id, t);
+    private void backpropFromTerminal(Value terminalGrad, IdentityHashMap<Object, Trainable> pendingSteps) {
+        Map<CompGraphNode, Value> grads = new LinkedHashMap<>();
+        grads.put(graph.terminal(), terminalGrad);
+
+        List<CompGraphNode> order = graph.topoOrder();
+        for (int i = order.size() - 1; i >= 0; i--) {
+            CompGraphNode n = order.get(i);
+            Value gradAtN = grads.get(n);
+            if (gradAtN == null) continue;
+
+            Primitive p = n.tNode().primitive();
+            if (!(p instanceof Differentiable diff)) continue;
+
+            List<Value> inputGrads = diff.backward(gradAtN);
+            if (p instanceof Trainable t) {
+                pendingSteps.put(t.trainableIdentity(), t);
+            }
+
+            for (int slot = 0; slot < n.slotCount(); slot++) {
+                SlotSource src = n.slot(slot);
+                if (src == null) continue;
+                if (slot >= inputGrads.size()) break;
+                Value g = inputGrads.get(slot);
+                if (g == null) continue;
+                accumulate(grads, src.source(), g);
             }
         }
+    }
+
+    private static void accumulate(Map<CompGraphNode, Value> grads, CompGraphNode key, Value addend) {
+        Value existing = grads.get(key);
+        if (existing == null) {
+            grads.put(key, addend);
+        } else {
+            grads.put(key, addValues(existing, addend));
+        }
+    }
+
+    private static Value addValues(Value a, Value b) {
+        if (a instanceof MatrixValue ma && b instanceof MatrixValue mb) {
+            if (ma.data().length != mb.data().length) {
+                throw new IllegalStateException(
+                        "gradient accumulator dim mismatch: " + ma.data().length + " vs " + mb.data().length);
+            }
+            double[] out = new double[ma.data().length];
+            for (int i = 0; i < out.length; i++) out[i] = ma.data()[i] + mb.data()[i];
+            return new MatrixValue(out);
+        }
+        if (a instanceof NumberValue na && b instanceof NumberValue nb) {
+            return new NumberValue(na.n() + nb.n());
+        }
+        throw new IllegalStateException(
+                "cannot accumulate gradients of type " + a.type() + " and " + b.type());
     }
 
     private void stepPending(IdentityHashMap<Object, Trainable> pending) {
@@ -100,12 +148,8 @@ public final class GraphTrainer {
         pending.clear();
     }
 
-    private static double halfMseToTarget(Value out, Value target) {
-        // Only computes a meaningful loss for MatrixValue targets in MVP;
-        // returns NaN for other types so logging can ignore them. Mandate-based
-        // verification is the proper success metric.
-        if (out instanceof sibarum.mcc.value.MatrixValue mo
-                && target instanceof sibarum.mcc.value.MatrixValue mt
+    private static double halfMse(Value out, Value target) {
+        if (out instanceof MatrixValue mo && target instanceof MatrixValue mt
                 && mo.data().length == mt.data().length) {
             double s = 0.0;
             for (int i = 0; i < mo.data().length; i++) {
@@ -114,7 +158,24 @@ public final class GraphTrainer {
             }
             return 0.5 * s;
         }
+        if (out instanceof NumberValue no && target instanceof NumberValue nt) {
+            double d = no.n() - nt.n();
+            return 0.5 * d * d;
+        }
         return Double.NaN;
+    }
+
+    private static Value mseGrad(Value out, Value target) {
+        if (out instanceof MatrixValue mo && target instanceof MatrixValue mt) {
+            double[] g = new double[mo.data().length];
+            for (int i = 0; i < g.length; i++) g[i] = mo.data()[i] - mt.data()[i];
+            return new MatrixValue(g);
+        }
+        if (out instanceof NumberValue no && target instanceof NumberValue nt) {
+            return new NumberValue(no.n() - nt.n());
+        }
+        throw new IllegalArgumentException(
+                "GraphTrainer: cannot produce MSE gradient for terminal type " + out.type());
     }
 
     /**
@@ -129,6 +190,6 @@ public final class GraphTrainer {
                 seen.putIfAbsent(t.trainableIdentity(), t);
             }
         }
-        return List.copyOf(seen.values());
+        return Collections.unmodifiableList(List.copyOf(seen.values()));
     }
 }

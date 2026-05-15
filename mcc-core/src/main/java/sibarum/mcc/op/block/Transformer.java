@@ -89,6 +89,19 @@ public final class Transformer {
     public int dIn() { return dIn; }
     public int dModel() { return dModel; }
     public int dFf() { return dFf; }
+    public int dOut() { return dOut; }
+
+    // Parameter accessors for serialization / introspection.
+    public double[][] win() { return Win; }
+    public double[][] wq()  { return Wq; }
+    public double[][] wk()  { return Wk; }
+    public double[][] wv()  { return Wv; }
+    public double[][] w1()  { return W1; }
+    public double[]   b1()  { return b1; }
+    public double[][] w2()  { return W2; }
+    public double[]   b2()  { return b2; }
+    public double[][] wo()  { return Wo; }
+    public double[]   bo()  { return bo; }
 
     public double[] forward(double[] flatInput) {
         if (flatInput.length != seqLen * dIn) {
@@ -142,9 +155,17 @@ public final class Transformer {
         return y.clone();
     }
 
-    public void backward(double[] target) {
-        double[] dY = new double[dOut];
-        for (int o = 0; o < dOut; o++) dY[o] = y[o] - target[o];
+    /**
+     * Backward pass given {@code dL/dY}. Accumulates parameter
+     * gradients and returns {@code dL/dX} (flat, length seqLen*dIn)
+     * so callers can chain gradients further back.
+     */
+    public double[] backward(double[] gradOutput) {
+        if (gradOutput.length != dOut) {
+            throw new IllegalArgumentException(
+                    "expected gradOutput dim " + dOut + ", got " + gradOutput.length);
+        }
+        double[] dY = gradOutput.clone();
 
         double[] dPooled = new double[dModel];
         for (int o = 0; o < dOut; o++) {
@@ -247,13 +268,18 @@ public final class Transformer {
             }
         }
 
+        double[] dXFlat = new double[seqLen * dIn];
         for (int i = 0; i < seqLen; i++) {
             for (int din = 0; din < dIn; din++) {
                 for (int m = 0; m < dModel; m++) {
                     gWin[din][m] += x[i][din] * dXp[i][m];
                 }
+                double s = 0.0;
+                for (int m = 0; m < dModel; m++) s += Win[din][m] * dXp[i][m];
+                dXFlat[i * dIn + din] = s;
             }
         }
+        return dXFlat;
     }
 
     public void step(double lr) {

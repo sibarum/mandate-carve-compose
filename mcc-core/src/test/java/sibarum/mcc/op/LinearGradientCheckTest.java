@@ -39,22 +39,20 @@ class LinearGradientCheckTest {
         double[] t = { 0.4, -0.6, 0.2 };
 
         MatrixValue mx = new MatrixValue(x);
-        MatrixValue mt = new MatrixValue(t);
         MatrixValue y0 = (MatrixValue) lin.apply(List.of(mx));
-        lin.backward(mt);
+        // Gradient-flow shape: gradOut = y - t under MSE.
+        double[] gradOut = new double[outDim];
+        for (int i = 0; i < outDim; i++) gradOut[i] = y0.data()[i] - t[i];
+        lin.backward(new MatrixValue(gradOut));
 
-        // Snapshot pendingDw / pendingDb via reflection on the public step path:
-        // Easier: probe the gradient via a loss closure. We compute the analytic
-        // gradient ourselves from the contract (dW = (y-t) · xᵀ, db = y-t).
+        // Analytic gradients per contract: dW[i,j] = dy[i] * x[j], db[i] = dy[i].
         double[][] analyticDw = new double[outDim][inDim];
         double[] analyticDb = withBias ? new double[outDim] : null;
-        double[] dy = new double[outDim];
-        for (int i = 0; i < outDim; i++) dy[i] = y0.data()[i] - t[i];
         for (int i = 0; i < outDim; i++) {
             for (int j = 0; j < inDim; j++) {
-                analyticDw[i][j] = dy[i] * x[j];
+                analyticDw[i][j] = gradOut[i] * x[j];
             }
-            if (withBias) analyticDb[i] = dy[i];
+            if (withBias) analyticDb[i] = gradOut[i];
         }
 
         // Finite difference: for each parameter, perturb and recompute loss.
@@ -105,11 +103,12 @@ class LinearGradientCheckTest {
         double[] x = { 0.1, -0.2, 0.5 };
         double[] t = { 1.0, -1.0 };
         MatrixValue mx = new MatrixValue(x);
-        MatrixValue mt = new MatrixValue(t);
 
         MatrixValue y0 = (MatrixValue) lin.apply(List.of(mx));
         double loss0 = halfMse(y0.data(), t);
-        lin.backward(mt);
+        double[] gradOut = new double[2];
+        for (int i = 0; i < 2; i++) gradOut[i] = y0.data()[i] - t[i];
+        lin.backward(new MatrixValue(gradOut));
         lin.step(0.1);
 
         MatrixValue y1 = (MatrixValue) lin.apply(List.of(mx));

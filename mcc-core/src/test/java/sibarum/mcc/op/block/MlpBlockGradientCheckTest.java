@@ -34,7 +34,9 @@ class MlpBlockGradientCheckTest {
 
         // Run forward + backward to populate gradients.
         MatrixValue y0 = (MatrixValue) block.apply(List.of(new MatrixValue(x)));
-        block.backward(new MatrixValue(t));
+        double[] gradOut = new double[t.length];
+        for (int i = 0; i < t.length; i++) gradOut[i] = y0.data()[i] - t[i];
+        block.backward(new MatrixValue(gradOut));
 
         // Snapshot analytic gradients.
         double[][][] analyticDw = deepCopy(mlp.weights(), accessGradWeights(mlp));
@@ -85,7 +87,9 @@ class MlpBlockGradientCheckTest {
 
         MatrixValue y0 = (MatrixValue) block.apply(List.of(new MatrixValue(x)));
         double loss0 = halfMse(y0.data(), t);
-        block.backward(new MatrixValue(t));
+        double[] gradOut = new double[t.length];
+        for (int i = 0; i < t.length; i++) gradOut[i] = y0.data()[i] - t[i];
+        block.backward(new MatrixValue(gradOut));
         block.step(0.05);
 
         MatrixValue y1 = (MatrixValue) block.apply(List.of(new MatrixValue(x)));
