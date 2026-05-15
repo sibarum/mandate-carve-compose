@@ -20,7 +20,7 @@
 
     <dependencies>
         <dependency>
-            <groupId>sibarum.strnn</groupId>
+            <groupId>sibarum.mcc</groupId>
             <artifactId>mcc-core</artifactId>
             <version>1.0-SNAPSHOT</version>
         </dependency>
