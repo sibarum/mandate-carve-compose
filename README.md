@@ -266,112 +266,75 @@ runnable; each closes with a written-up diagnostic.
   `FullCorpusSnapshotDemo`, and side-by-side `snapshot-iter*.txt`
   artifacts for review.
 - **v3 P11** — **KSQ: a fixed-algebra substrate.** Parallel research
-  line opening alongside the MCC NLP arc. KSQ
-  (Key-Split-Quaternion) is an architecture where the *substrate* is
-  the split-quaternion algebra $\mathbb{H}_s \cong M_2(\mathbb{R})$
-  with four hand-picked anchors (Möbius cardinals: $K_0$ identity,
-  $K_i$ elliptic, $K_j$ hyperbolic, $K_\infty$ idempotent) as fixed
-  structural constants, and learning is constrained to **two small
-  embedding tables** — token → anchor coefficients and β → output
-  logits. No learned weight matrices anywhere in the middle. The
-  "computation" lives in the algebra (one bilinear step $Q^2 = Q
-  \cdot Q$); the model's expressive job is to pick where in the
-  algebra each input lands. Three architectural iterations, each
-  named by a structural diagnostic: **iter 1** (chain $S_T = Q_T
-  \cdots Q_1$): transformer-shaped, REJECTED — the algebra was being
-  used as sequence-composition. **iter 2** (sum-pool token logits →
-  softmax α → single Q → Q²): T=2 XOR converges, but the spec's
-  predicted K_i specialization is unreachable (0/40 trials); the
-  optimizer locks onto K_j because softmax α makes the cross-term
-  $\beta_i = 2 \alpha_0 \alpha_i$ sign-bounded. **iter 3**
-  (signed α via tanh + squared-product regularizer): K_i becomes
-  accessible (0 → 19 occurrences), the K_i/K_j basin counts split
-  exactly 5-5 at λ=0.1, and the architecture's elliptic/hyperbolic
-  symmetry is restored. A new degenerate corner surfaces — saturated
-  $K_i \leftrightarrow K_j$ paired specialization makes Q² = 0 via
-  the anti-commutator $\{K_i, K_j\} = 0$ — names the next mandate
-  (contrastive cross-vocab regularizer; deferred). Every iteration
-  gradient-checked to machine epsilon before any training, so
-  "architecture is wrong" stayed cleanly separated from "math is
-  wrong." **iter 4** (re-align $K_\infty$ from $(1+k)/2$ to
-  $(1+j)/2 = e_+$, the idempotent of the *same* $\mathbb{R}[j]$
-  subalgebra that $K_j$ generates): the anchor set becomes
-  intentionally linearly dependent ($K_0 + K_j = 2 K_\infty$,
-  spanning 3 dims in $M_2(\mathbb{R})$ rather than 4), so $K_j$
-  and $K_\infty$ basins now represent two natural *bases* of the
-  same subalgebra. XOR solve rate preserved at 10/10 across λ ≤ 0.1;
-  seed 3 lands cleanly in $K_j \to K_\infty$ (one token in
-  generator basis, one in idempotent basis), the cleanest possible
-  algebraic outcome for the inference-specialization collapse.
-  **iter 5** (cross-vocab contrastive regularizer promoted from
-  deferred to implemented after the same same-anchor collapse
-  failure was named in two consecutive iterations):
-  $\mathcal{R}_{\text{cross}} = \nu \sum_{v_1 \neq v_2}
-  \langle\alpha(v_1), \alpha(v_2)\rangle^2$, gradient-checked at
-  6.8e-11. λ=1.0 solve rate goes 6/10 → 9/10 with ν ≥ 0.1.
-  Small regression at λ=0.1 (10/10 → 9/10) because the squared
-  inner product penalizes anti-aligned same-anchor solutions
-  (valid for XOR; the regularizer prefers truly orthogonal
-  anchors). No single (λ, ν) achieves clean 10/10 across all
-  three λ; names the iter-6 mandate (adaptive ν schedule: strong
-  early, decay late). Adds `sibarum.strnn.ksq.*` (anchors, Mat2,
-  embedding table, output head, model) and two demos.
-  The methodology lesson
-  (substrate-construction mandates are mandates too, with the same
-  ablate-able-effect discipline as the architecture and data
-  mandates from iter 1–23) extends MCC down a level: the algebra
-  itself is a designed primitive whose choice has measurable
-  consequences. **iter 6** (the "elevator" arc — Babe Ruth call from
-  the elevator plan: remove tanh, treat embedding magnitude as
-  polynomial level, add projective anchor for level-lowering, predict
-  T=4 / T=8 parity become solvable): full arc landed in
-  `sibarum.strnn.ksq.elevator`, falsified empirically. Phase 0
-  diagnostic (ρ_∞ on iter-5) showed Outcome A — gradient WAS asking
-  for K_∞ direction. Phase 1 (unit-norm + magnitude-to-head):
-  improved solve rate (called-shot wrong, but the improvement was
-  diagnosable as extra head capacity, not elevator dynamics). Phase 2
-  (α = ℓ directly): diverged as predicted (3/10 solved + 7 NaN).
-  Phase 3 (add K_eMinus): stabilized at LR=0.1 (10/10 on XOR).
-  Phase 4 (T=2/T=4/T=8 prediction battery + gradient clipping for
-  safety): **both falsification criteria fired** for the
-  magnitude-as-level reading — T=4 and T=8 converge to predicting
-  uniform (CE = log 2, accuracy at chance); magnitudes do not cluster
-  monotonically with task degree. The bilinear step Q² has a hard
-  expressivity ceiling at degree 2 regardless of magnitude. **Spec
-  correction post-arc:** the elevator plan as written said
-  "magnitude is level"; the corrected reading is "level IS the
-  exponent" — level $z$ means $Q^z$ (via matrix exp for continuous
-  $z$), not ‖ℓ‖ growing. The empirical falsification stands for the
-  *tested* hypothesis (magnitude-as-level) and is consistent with the
-  corrected one (magnitude isn't level because magnitude isn't
-  exponent), but the exponent-as-level mechanism is a different
-  architecture and remains untested. A future arc with hand-rolled
-  matrix log/exp on $M_2(\mathbb{R})$ and Daleckii–Krein backward
-  would test it. iter-5 KSQ in `sibarum.strnn.ksq` is unchanged.
-  **iter 7** (two parallel attempts at exponent-as-level): (A)
-  `PowerLevelModel` adds a continuous scalar $n$ and signed-power
-  activation $y_i = \text{sign}(\ell_i)|\ell_i|^n$ before the lift
-  (degree of $S = Q^2$ is $2n$). Free-$n$ falsified: $n$ drifts
-  *downward* on T=4/T=8 rather than upward (T=4 0/10, T=8 0/10).
-  Frozen-$n$ ablation confirms the expressivity *is* there at $n=2$
-  (T=4 solves 10/10 at LR=0.01, embed_init=0.25); the failure is
-  gradient flow not reaching $n=2$ from $n=1$, not a missing
-  expressivity. T=8 at $n=4$ remains out of reach.
-  (B) `KSQP` (`sibarum.strnn.ksqp`) takes the opposite tack — drop
-  smooth flow, use a discrete integer $p$ updated by null-cone events
-  on the split-quaternion parameters. Different algebra
-  (4-component split quat with sandwich op), different aggregation
-  (split-quat product across tokens, or soft-attention KV pool).
-  Works on T=2 XOR variants (9–10/10), works on 2D continuous XOR via
-  KV cache (10/10 frozen and trainable keys), fails on the 8-cluster
-  alternating-label circle (0/10). The discrete mechanism mostly
-  doesn't fire on XOR (most solved seeds stay at $p=1$); its
-  contribution on higher-degree tasks is not yet demonstrated. Both
-  iter-7 attempts raise the expressivity ceiling beyond iter-5's
-  degree 2 but leave the *level discovery* mechanism as the open
-  problem. Code in `sibarum.strnn.ksq.elevator.PowerLevelModel` and
-  `sibarum.strnn.ksqp.*`; raw data in `ksqp-data/`. iter-5 KSQ in
-  `sibarum.strnn.ksq` is still unchanged.
+  line. The substrate is the split-quaternion algebra (H_s ≅ M₂(R))
+  with four fixed Möbius-cardinal anchors (K_0, K_i, K_j, K_∞);
+  learning is confined to two small embedding tables (token → anchor
+  coefficients, β → output logits). No learned weight matrices
+  anywhere in the middle — the single bilinear step Q² is the
+  "computation", and the embedding picks where in the algebra each
+  input lands. Five architectural iterations on the base model walked
+  the basin geometry from a chain (REJECTED — algebra-as-sequence-
+  composition) to sum-pool + signed-α (tanh) + per-vocab and
+  cross-vocab regularizers; iter 5 lifts λ=1.0 solve rate from
+  6/10 → 9/10 with the cross-vocab term. Saddle-vs-basin verification
+  shows scalar-trivial init is a saddle, not a basin (11/12 conditions
+  leave). **iter 6** (the "elevator" arc): the magnitude-as-level
+  hypothesis was falsified empirically — Q² has a hard degree-2
+  ceiling regardless of magnitude, so T=4 and T=8 parity converge to
+  predicting uniform. Post-arc spec correction: "level IS the
+  exponent" (Q^z via matrix exp), not magnitude. **iter 7**: two
+  parallel attempts at exponent-as-level. (A) `PowerLevelModel`:
+  signed-power activation y = sign(ℓ)·|ℓ|^n before the lift; free-n
+  falsified (n drifts downward), frozen-n at n=2 confirms the
+  expressivity is there but gradient flow doesn't reach it. (B)
+  `KSQP` (`sibarum.strnn.ksqp`): discrete integer p updated by
+  null-cone events on the split-quaternion parameters; solves XOR
+  variants 9–10/10 and 2D continuous XOR via KV cache 10/10, fails
+  the 8-cluster circle 0/10. The discrete mechanism mostly doesn't
+  fire on XOR; its contribution on higher-degree tasks remains
+  undemonstrated. Both iter-7 attempts raise the ceiling but leave
+  *level discovery* as the open problem. Every iteration gradient-
+  checked to machine epsilon before training. Code in
+  `sibarum.strnn.ksq.*`, `sibarum.strnn.ksq.elevator.*`,
+  `sibarum.strnn.ksqp.*`; raw data in `ksqp-data/`. Full detail in
+  [`docs/16-ksq-substrate.md`](docs/16-ksq-substrate.md).
+- **v3 P12** — **HPB: harmonic piecewise basis.** Third parallel
+  research line. Architecture: scalar input → harmonic lift
+  `[tri_1(x), sq_1(x), …, tri_K(x), sq_K(x)]` → linear readout.
+  The plan names three load-bearing properties: exact derivative
+  pairing (d/dx tri_k = sq_k), tunable regularity via convolution
+  with compact-support kernels (δ/box/tent), and exact-rational
+  arithmetic (deferred — `double[]` for iters 1+2). **Iter 1**:
+  T1 basis correctness (3039 checks, 0 mismatches); T3 gradient
+  check (max err 7.9e-10); T5 1D XOR 10/10 at K=1 — but subsequent
+  audit found T5 structurally trivial (one period of sq_1 *is* a
+  parity at four equally-spaced points). **Iter 1.5** (stronger
+  capacity tests after T5's triviality): T6 parity sweep —
+  T=4 solves at K=8 (HPB has no degree-2 ceiling that killed KSQ
+  at T=4); T=8 not reached at K≤16; cost is rank saturation under
+  sample aliasing, K ≈ N/2 threshold. 2D XOR over independent
+  inputs: per-dim+linear fails (confirms T5 was encoding-
+  dependent), joint tensor-product+linear K=1 solves. Long-run
+  CE descent (200k epochs) showed CE has no finite-norm optimum
+  on separable data (CE(t) ≈ 0.62/t), so the "exact-rational
+  basin" claim is malformed under CE. **L2 against label targets**
+  verified the basin properly: all 5 seeds reach the closed-form
+  rational point (w_tri=0, w_sq=−1/8, b=1/2) to float64 precision
+  (‖W − W*‖ ≈ 5e-16). **Iter 2**: closed-form kernel convolution
+  via antiderivative differences (box uses one antiderivative,
+  tent uses two via the doubled-box identity). T2 derivative
+  pairing under smoothing verified exactly (7000 checks, 0
+  mismatches, max abs err 0.0). T7 smooth-function approximation
+  via closed-form LS: smoothed kernels give **2–57× MSE reduction**
+  vs δ on a smooth target at K ≥ 8, scaling with width. The plan's
+  specific `tent < box < δ` ordering FIRED — empirically `box ≤
+  tent ≤ δ` (tent over-smooths via sinc² Fourier rolloff vs box's
+  sinc), but the broader F3 (smoothing buys regularity) holds.
+  Methodology lessons: closed-form LS removes SGD-convergence
+  confounds for capacity claims; the "exact basin" question is
+  only well-posed under a loss with a finite-norm minimum. Code
+  in `sibarum.strnn.hpb`. Full detail in
+  [`docs/17-harmonic-piecewise-basis.md`](docs/17-harmonic-piecewise-basis.md).
 
 All implementation is in Java 25. MLPs and transformer blocks are
 written from scratch (~500 lines including backprop) with no
@@ -404,6 +367,8 @@ In dependency order — each builds on the previous:
 | [`KSQP.md`](docs/KSQP.md) | KSQP plan: KSQ with discrete integer-valued polynomial-degree control by null-cone events; hybrid dynamical system on top of standard gradient training |
 | [`ksq_iter6_elevator_plan.md`](docs/ksq_iter6_elevator_plan.md) | iter-6 plan as written (magnitude-as-level); preserved for the falsification record |
 | [`ksq_iter7_iterated_squaring_plan.md`](docs/ksq_iter7_iterated_squaring_plan.md) | A third iter-7 direction (iterated squaring with depth mixing) that wasn't implemented — coherent candidate for follow-up |
+| [`harmonic_piecewise_basis.md`](docs/harmonic_piecewise_basis.md) | HPB plan: offset-paired triangle/square basis organized by harmonic frequency; exact derivative pairing, tunable regularity via δ/box/tent kernels; testing plan with named falsification criteria (F1–F5) |
+| [`17-harmonic-piecewise-basis.md`](docs/17-harmonic-piecewise-basis.md) | HPB iters 1, 1.5, 2 results — basis correctness, gradient check, T-bit parity, 2D XOR architecture comparison, long-run CE diagnostic, L2 exact-basin verification, smoothing kernels (box, tent) with T7 closed-form-LS approximation sweep |
 
 ## What has been demonstrated
 
@@ -550,45 +515,20 @@ In dependency order — each builds on the previous:
   engineering — designing for inspectability changes what you build.
 
 - **A fixed-algebra substrate is a viable MCC primitive** ([16](docs/16-ksq-substrate.md)).
-  KSQ uses the split-quaternion algebra
-  $\mathbb{H}_s \cong M_2(\mathbb{R})$ as a fixed substrate with four
-  Möbius-cardinal anchors, and constrains learning to two small
-  embedding tables. No learned weight matrices anywhere in the middle;
-  the model's expressive job is choosing where in the algebra each
-  input lands. Five structural rewrites driven by named diagnostics:
-  chain (transformer-shaped) → sum-pool + softmax α + $Q^2$ (K_i
-  basin unreachable, 0/40) → sum-pool + tanh signed α + $Q^2$ (K_i
-  becomes accessible, K_i/K_j basins split exactly 5-5 at λ=0.1) →
-  re-align $K_\infty$ to the same $\mathbb{R}[j]$ subalgebra as
-  $K_j$ (anchor set becomes intentionally linearly dependent;
-  $K_j \leftrightarrow K_\infty$ basins now express two bases of the
-  same subalgebra rather than two different subalgebras) →
-  cross-vocab contrastive regularizer (same-anchor collapse mandate
-  named twice in iters 3 and 4 promoted to implemented; λ=1.0
-  goes 6/10 → 9/10). Each iteration was gradient-checked to machine
-  epsilon *before* training, cleanly separating "math is wrong" from
-  "architecture is wrong."
-  Extends the methodology pattern (mandates with ablate-able effects)
-  down to the substrate-construction layer: the algebra itself —
-  including the precise *choice of anchor representatives*, not just
-  the anchor count — is a designed primitive whose choice has
-  measurable consequences for which basins the optimizer can find
-  and what the basin structure means algebraically. **Solve-rate is
-  insufficient alone**: a scalar-collapse "solution" (both tokens on
-  K_0) passes XOR but fails the architectural claim, so the demo
-  reports raw AND non-trivial-subalgebra solve rate. With a strict
-  scalar-specialization classifier (K_0 dominant AND every other |α|
-  < 0.5), the two metrics coincide in all 120 trials: at our scale
-  the architecture never trivializes, even when basin-label
-  shorthand suggested otherwise. **Saddle-vs-basin verification**
-  goes further: initializing the embedding directly at scalar-trivial
-  (token 0 → pure +K_0, token 1 → pure -K_0) and training under
-  4 reg settings × 3 init magnitudes finds that 11/12 conditions
-  LEAVE scalar-trivial — the K_j, K_∞ components grow from 0 (at
-  init) to 0.20–0.58 magnitude. Scalar-trivial is a saddle, not a
-  basin. The architecture prefers to use its substrate is now a
-  tested dynamical property, not an inference from random-init
-  outcomes alone.
+  KSQ uses the split-quaternion algebra (H_s ≅ M₂(R)) as a fixed
+  substrate with four Möbius-cardinal anchors and confines learning
+  to two small embedding tables — no learned weight matrices in the
+  middle. Five structural rewrites driven by named diagnostics walked
+  the basin geometry from a chain (REJECTED) through sum-pool +
+  signed-α + per-vocab regularizer (iter 3: K_i/K_j basins split
+  symmetrically) to cross-vocab contrastive regularizer (iter 5:
+  λ=1.0 solve rate 6/10 → 9/10). Every iteration gradient-checked at
+  machine epsilon before training, cleanly separating math-wrong from
+  architecture-wrong. Methodology extends to the substrate layer:
+  the algebra is a designed primitive whose choice has measurable
+  basin-structure consequences. Saddle-vs-basin verification confirms
+  the architecture prefers to use its substrate (11/12 init
+  conditions leave scalar-trivial as a dynamical event, not a basin).
 
 ## Known limitations
 
@@ -773,13 +713,22 @@ Available demos, ordered by dependency:
 | `ElevatorParityDemo`          | v3 P11 / iter 6 | XOR sweep on the final iter-6 elevator architecture (α = sumLogits direct, 5 anchors including K_eMinus). Stabilizes at LR=0.1, 10/10 across the (λ, ν) grid |
 | `ElevatorMagnitudeClusterDemo`| v3 P11 / iter 6 | **Phase 4 prediction battery (falsification of magnitude-as-level)**: T=2/T=4/T=8 parity with gradient clipping. T=2 solves 10/10; T=4 and T=8 collapse to predicting uniform. Magnitudes don't track task degree. Falsifies magnitude-as-level reading; consistent with the corrected exponent-as-level reading (which remains untested) |
 | `PowerLevelGradientCheckDemo` | v3 P11 / iter 7A | Finite-difference verification of `PowerLevelModel`'s backward (signed-power activation + chain into bilinear + scalar ∂L/∂n) at machine epsilon |
-| `PowerLevelParityDemo`        | v3 P11 / iter 7A | Free-$n$ prediction battery: T=2 solves 10/10 with $n$ ≈ 1.2; T=4 and T=8 fail because $n$ drifts *downward* (often negative) instead of upward. Falsifies the free-$n$ form of exponent-as-level |
-| `PowerLevelAblationDemo`      | v3 P11 / iter 7A | **Frozen-$n$ diagnostic**: $n=2$ on T=4 with LR=0.01, embed_init=0.25 solves 10/10 — the expressivity *is* there at $n=2$. Failure mode of free-$n$ is gradient flow not reaching it, not a missing ceiling. T=8 at $n=4$ still 0/10 |
-| `KsqpGradientCheckDemo`       | v3 P11 / iter 7B | Finite-difference verification of `KsqpModel`'s backward (lift → projection → sandwich → split-quat product → head) at machine epsilon, across uniform and mixed $p$ assignments |
+| `PowerLevelParityDemo`        | v3 P11 / iter 7A | Free-n prediction battery: T=2 solves 10/10 with n ≈ 1.2; T=4 and T=8 fail because n drifts *downward* (often negative) instead of upward. Falsifies the free-n form of exponent-as-level |
+| `PowerLevelAblationDemo`      | v3 P11 / iter 7A | **Frozen-n diagnostic**: n=2 on T=4 with LR=0.01, embed_init=0.25 solves 10/10 — the expressivity *is* there at n=2. Failure mode of free-n is gradient flow not reaching it, not a missing ceiling. T=8 at n=4 still 0/10 |
+| `KsqpGradientCheckDemo`       | v3 P11 / iter 7B | Finite-difference verification of `KsqpModel`'s backward (lift → projection → sandwich → split-quat product → head) at machine epsilon, across uniform and mixed p assignments |
 | `KsqpKvGradientCheckDemo`     | v3 P11 / iter 7B | Finite-difference verification of `KsqpKvModel`'s backward (soft-attention KV pool, frozen and trainable stored keys) at machine epsilon |
-| `KsqpXorDemo`                 | v3 P11 / iter 7B | KSQP indexed XOR with null-cone-event $p$ control and split-quat-product cross-token aggregation. Writes CSV trajectories to `ksqp-data/<tag>/`; 9/10 on the implemented sign-to-direction mapping |
+| `KsqpXorDemo`                 | v3 P11 / iter 7B | KSQP indexed XOR with null-cone-event p control and split-quat-product cross-token aggregation. Writes CSV trajectories to `ksqp-data/<tag>/`; 9/10 on the implemented sign-to-direction mapping |
 | `KsqpKvXorDemo`               | v3 P11 / iter 7B | KSQP soft-attention KV cache on continuous 2D XOR with 4 corner prototypes. 10/10 with both frozen and trainable stored keys |
 | `KsqpKvCircleDemo`            | v3 P11 / iter 7B | KSQP soft-attention KV on 8-cluster alternating-label circle (M=8). 0/10 stuck — scale-up failure case |
+| `HpbBasisCorrectnessDemo`     | v3 P12 / iter 1 | T1: pointwise verification that `tri_k`, `sq_k` match the §2.1 spec and that `tri_k.derivative() == sq_k` exactly. 3039 checks, 0 mismatches |
+| `HpbGradientCheckDemo`        | v3 P12 / iter 1 | T3: finite-difference verification of the HPB backward at machine epsilon. 40 params, max abs err 7.9e-10 |
+| `HpbXorDemo`                  | v3 P12 / iter 1 | T5: 1D-encoded XOR through linear readout over raw (δ-kernel) basis. K=1 and K=2, 10/10 seeds each. Subsequent audit: structurally trivial (one period of sq_1 *is* a parity at four equally-spaced points) |
+| `HpbParityDemo`               | v3 P12 / iter 1.5 | T6: T ∈ {2, 4, 8} parity × K ∈ {1, 2, 4, 8, 16}. T=2 at K=1, T=4 at K=8, T=8 not reached at K≤16. HPB has no degree-2 ceiling (KSQ's killer); cost is rank saturation under sample aliasing |
+| `Hpb2dXorDemo`                | v3 P12 / iter 1.5 | 2D XOR over independent inputs, three architectures. Per-dim+linear 0/5 (predicted fail), joint tensor-product+linear K=1 5/5, per-dim+hidden ReLU+linear 5/5 |
+| `HpbXorLongRunDemo`           | v3 P12 / iter 1.5 | Long-run CE descent: 200k epochs, log CE+‖W‖+margin at checkpoints. Confirms CE has no finite-norm optimum on separable data — `CE(t) ≈ 0.62/t`, margin `~0.7·log₂(t)`. "Exact basin" claim under CE is category error |
+| `HpbXorL2Demo`                | v3 P12 / iter 1.5 | **Exact-rational basin verified under L2**: 5/5 seeds reach `(w_tri, w_sq, b) = (0, -1/8, 1/2)` to float64 precision in 5000 epochs (half-MSE 1.12e-31, ‖W − W*‖ ≈ 5e-16) |
+| `HpbDerivativePairingDemo`    | v3 P12 / iter 2 | T2: derivative pairing under smoothing verified exactly via analytic identities on the antiderivative chain (`sq.antideriv() ≡ tri`, `sq.antideriv().antideriv() ≡ tri.antideriv()`). 7000 pointwise checks, 0 mismatches, max abs err 0.0 |
+| `HpbSmoothApproximationDemo`  | v3 P12 / iter 2 | T7: smooth-function approximation via closed-form least squares; δ/box/tent kernels × K ∈ {2, 4, 8, 16} × widths {T_k/16, T_k/8, T_k/4}. Smoothed kernels give **2–57× MSE reduction** vs δ at K ≥ 8; plan's `tent < box < δ` ordering fired — empirically `box ≤ tent ≤ δ` |
 
 ## Repository layout
 
@@ -814,6 +763,15 @@ strnn-model/src/main/java/sibarum/strnn/          ← THE FRAMEWORK
 │                  # KsqpModel (indexed vocab: lift → P_d → sandwich → split-quat product
 │                  # across tokens → head), KsqpKvModel (content-addressable KV with soft
 │                  # attention; stored keys frozen or trainable).
+├── hpb/           # P12: harmonic piecewise basis — third parallel research line.
+│                  # PiecewisePolynomial (periodic, double-coefficients, derivative,
+│                  # antiderivative with drift-correction), HarmonicBasis (triK/sqK factories
+│                  # over unit period T=1/k, amplitude 1), HpbModel (lift + linear readout
+│                  # + softmax-CE backward), SmoothedBasisElement (δ/box/tent kernel
+│                  # convolution via closed-form antiderivative differences),
+│                  # HpbRegressionModel (smoothed lift + half-MSE for L2 / approximation
+│                  # tasks). 3-property substrate: derivative pairing, tunable regularity,
+│                  # exact rationals (deferred — double[] for iters 1+2).
 └── demo/          # all runnable framework demos              ← Compose (the runnable demonstrations)
 
 mcc-elden-ring/src/main/java/sibarum/elden/       ← P10 DOWNSTREAM CONSUMER
@@ -826,7 +784,7 @@ mcc-elden-ring/src/main/java/sibarum/elden/       ← P10 DOWNSTREAM CONSUMER
 ├── training/      # TaggingTrainingData, TaggerPipeline
 └── demo/          # all NLP pipeline demos
 
-docs/              # design doc + phase result writeups (01..16)
+docs/              # design doc + phase result writeups (01..17)
 strnn-model/src/main/resources/sample-semantics.txt  # hand-crafted ontology used by v3 P1 demos
 download/          # external datasets pulled in for P10 (UD CoNLL-U, Parquet, Lexicanum); .gitignored
 download-files.md  # attribution paper-trail for downloaded datasets
