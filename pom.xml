@@ -4,8 +4,8 @@
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
 
-    <groupId>sibarum.strnn</groupId>
-    <artifactId>symbolic-term-rewrite-neural-network</artifactId>
+    <groupId>sibarum.mcc</groupId>
+    <artifactId>mandate-carve-compose</artifactId>
     <version>1.0-SNAPSHOT</version>
     <packaging>pom</packaging>
     <modules>
