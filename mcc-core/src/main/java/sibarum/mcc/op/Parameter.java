@@ -60,6 +60,13 @@ public final class Parameter implements Trainable, Differentiable, Parameterized
         this.data = initialData.clone();
     }
 
+    @Override
+    public void reinitialize(long seed) {
+        double[] fresh = randomInit(shape, seed);
+        System.arraycopy(fresh, 0, data, 0, data.length);
+        pendingGrad = null;
+    }
+
     private static double[] randomInit(int[] shape, long seed) {
         int n = TensorValue.volume(shape);
         double bound = Math.sqrt(3.0 / Math.max(1, n));

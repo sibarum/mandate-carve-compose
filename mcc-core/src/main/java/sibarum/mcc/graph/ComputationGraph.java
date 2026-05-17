@@ -70,9 +70,21 @@ public final class ComputationGraph {
                     inputs.add(v);
                 }
             }
-            n.setProducedValue(n.tNode().primitive().apply(inputs));
+            try {
+                n.setProducedValue(n.tNode().primitive().apply(inputs));
+            } catch (IllegalStateException ex) {
+                throw new IllegalStateException(prefixWith(n, ex), ex);
+            } catch (IllegalArgumentException ex) {
+                throw new IllegalArgumentException(prefixWith(n, ex), ex);
+            } catch (RuntimeException ex) {
+                throw new RuntimeException(prefixWith(n, ex), ex);
+            }
         }
         return terminal.producedValue();
+    }
+
+    private static String prefixWith(CompGraphNode n, Throwable t) {
+        return "node '" + n.id() + "' (" + n.tNode().primitive().name() + "): " + t.getMessage();
     }
 
     private List<CompGraphNode> computeTopo() {

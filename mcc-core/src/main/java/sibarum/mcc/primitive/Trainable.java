@@ -19,4 +19,15 @@ public interface Trainable extends Differentiable {
     void step(double lr);
 
     Object trainableIdentity();
+
+    /**
+     * Re-initialize learned parameters from a fresh random seed and drop
+     * any pending gradient accumulator state. Used by editor tooling to
+     * recover from divergence (NaN weights) without rebuilding the graph
+     * topology. Default throws — implementors that own parameter buffers
+     * should override.
+     */
+    default void reinitialize(long seed) {
+        throw new UnsupportedOperationException(name() + " does not support reinitialize yet");
+    }
 }

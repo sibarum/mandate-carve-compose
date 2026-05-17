@@ -158,6 +158,24 @@ public final class Linear implements Trainable, Parameterized, Configurable {
     }
 
     @Override
+    public void reinitialize(long seed) {
+        Random rng = new Random(seed);
+        double bound = Math.sqrt(6.0 / (inDim + outDim));
+        for (int i = 0; i < outDim; i++) {
+            for (int j = 0; j < inDim; j++) {
+                w[i][j] = (rng.nextDouble() * 2.0 - 1.0) * bound;
+            }
+        }
+        if (withBias) {
+            java.util.Arrays.fill(b, 0.0);
+        }
+        pendingDw = null;
+        pendingDb = null;
+        lastInput = null;
+        lastOutput = null;
+    }
+
+    @Override
     public Inversion inversion() {
         // Trainable: the carver doesn't need a specific input value, just
         // *some* matrix of the right dim it can bind further upstream. Ask
