@@ -5,6 +5,7 @@ import sibarum.mcc.op.Concat;
 import sibarum.mcc.op.CosineSimilarity;
 import sibarum.mcc.op.CrossProduct3;
 import sibarum.mcc.op.DotProduct;
+import sibarum.mcc.op.HarmonicLift;
 import sibarum.mcc.op.IntToVector;
 import sibarum.mcc.op.Linear;
 import sibarum.mcc.op.Magnitude;
@@ -30,6 +31,7 @@ import sibarum.mcc.op.VectorToTernion;
 import sibarum.mcc.embedding.Embed;
 import sibarum.mcc.embedding.Lookup;
 import sibarum.mcc.embedding.SymbolEmbeddingTable;
+import sibarum.mcc.op.advanced.SmoothedBasisElement;
 import sibarum.mcc.op.block.MlpBlock;
 import sibarum.mcc.op.block.TransformerBlock;
 
@@ -95,6 +97,17 @@ public final class BuiltinPrimitives {
             int from = ((Number) requireField(cfg, "from")).intValue();
             int to = ((Number) requireField(cfg, "to")).intValue();
             return new Slice(from, to);
+        });
+
+        // HarmonicLift: parameterless basis lift. Config carries K, inputDim,
+        // kernel choice, and width fraction. No learned parameters to restore.
+        r.register("harmonic-lift", cfg -> {
+            int K = ((Number) requireField(cfg, "K")).intValue();
+            int inputDim = ((Number) requireField(cfg, "inputDim")).intValue();
+            SmoothedBasisElement.Kernel kernel = SmoothedBasisElement.Kernel.valueOf(
+                    (String) requireField(cfg, "kernel"));
+            double widthFrac = ((Number) cfg.getOrDefault("widthFrac", 0.0)).doubleValue();
+            return new HarmonicLift(K, inputDim, kernel, widthFrac);
         });
 
         // Trainables: structural config selects shape; parameters are restored

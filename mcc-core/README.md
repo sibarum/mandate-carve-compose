@@ -82,11 +82,27 @@ string), `IntToVector` (integer index → vector, trainable),
 output-only learnable value of any Value type), `MlpBlock`,
 `TransformerBlock`.
 
+**Feature lifts** (parameterless, Differentiable):
+
+`HarmonicLift` — per-dimension harmonic piecewise basis lift,
+`R^d → R^{d·2K}` mapping each input component to its 2K-vector of
+triangle/square features `[tri_1(x), sq_1(x), …, tri_K(x), sq_K(x)]`.
+Three kernel choices (`DELTA`, `BOX`, `TENT`) controlling the
+basis regularity. Composes with `Linear` for a linear readout, or
+with `MlpBlock` for non-linear interactions across the lifted
+features. Promoted from `sibarum.strnn.hpb` after surviving iters 1,
+1.5, 2 in the research line; see `docs/17-harmonic-piecewise-basis.md`.
+
 **Algebra utilities** (called by primitives, not directly graph nodes):
 
 `op/advanced/Mat2` (2×2 helpers), `op/advanced/SplitQuat` (4D
 split-quat with full backward), `op/advanced/PolyLift` (Π-net
-monomial lift with backward).
+monomial lift with backward),
+`op/advanced/PiecewisePolynomial` (periodic piecewise-polynomial
+with derivative + drift-corrected antiderivative),
+`op/advanced/HarmonicBasis` (triK/sqK factories),
+`op/advanced/SmoothedBasisElement` (closed-form kernel convolution
+via antiderivative differences; used by `HarmonicLift`).
 
 **Carver scaffolding**:
 
@@ -197,6 +213,11 @@ Add `Trainable` if your op holds learnable parameters; add
   infer for a 2-layer MLP.
 - `examples/CarveThenTrainExample` — declare a mandate, carve a graph
   from the substrate, train it to satisfy the mandate.
+- `examples/XorWithHpbExample` — `HarmonicLift` + `Linear` on
+  1D-encoded XOR. SGD reaches the closed-form rational L2 optimum
+  `(w_tri, w_sq, b) = (0, -1/8, 1/2)` to float64 precision in a few
+  hundred epochs; demonstrates the exact-rational basin property
+  end-to-end.
 
 Run with:
 
